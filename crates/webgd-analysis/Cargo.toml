@@ -1,0 +1,9 @@
+[package]
+name = "webgd-analysis"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+naga.workspace = true
+glsl-lang.workspace = true
+thiserror.workspace = true

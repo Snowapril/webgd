@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/webgd-core", "crates/webgd-analysis", "xtask"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+webgd-core = { path = "crates/webgd-core" }
+webgd-analysis = { path = "crates/webgd-analysis" }
+webgd-replay = { path = "crates/webgd-replay" }
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts"] }
+egui = "0.36"
+egui_dock = "0.21.1"
+wgpu = { version = "30", default-features = false, features = ["std", "webgpu", "webgl", "wgsl"] }
+naga = { version = "30", features = ["wgsl-in"] }
+glsl-lang = "0.8.1"
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+base64 = "0.23"
+log = "0.4"
+thiserror = "2"
