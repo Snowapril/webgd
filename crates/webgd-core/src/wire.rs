@@ -1,6 +1,5 @@
 //! Decoder for the `hook.js` wire format (see `WireWriter` in extension/hook.js).
 use crate::capture::*;
-use std::collections::BTreeMap;
 
 pub const MAGIC: &[u8; 4] = b"WGDW";
 pub const VERSION: u32 = 1;
@@ -136,7 +135,7 @@ impl Decoder<'_> {
     }
 
     fn run(mut self) -> Result<Capture, WireError> {
-        if self.r.take(4).map_err(|_| WireError::BadMagic)? != MAGIC {
+        if self.r.take(4)? != MAGIC {
             return Err(WireError::BadMagic);
         }
         let v = self.r.u32()?;

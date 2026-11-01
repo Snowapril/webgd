@@ -43,11 +43,9 @@ fn decodes_fixture() {
 
 #[test]
 fn every_prefix_is_truncated() {
-    // The 4-byte magic prefix reports BadMagic; everything after must be Truncated.
     for n in 0..FIXTURE.len() {
         match decode(&FIXTURE[..n]) {
             Err(WireError::Truncated { .. }) => {}
-            Err(WireError::BadMagic) if n < 4 => {}
             other => panic!("prefix {n}: {other:?}"),
         }
     }
