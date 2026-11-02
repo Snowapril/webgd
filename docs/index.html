@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webgd: in-browser WebGL2/WebGPU frame debugger</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1d1f21;--muted:#5c6066;--card:#fff;--line:#d9dbde;--accent:#2457c5;--accent2:#0f7b6c;--warn:#a15c00;--code:#f1f2f4;--box:#eef3fc;--box2:#e9f6f2;--box3:#f8f1e6}
+@media (prefers-color-scheme:dark){:root{--bg:#141618;--fg:#e4e6e8;--muted:#9aa0a6;--card:#1c1f22;--line:#33373c;--accent:#7aa2f7;--accent2:#5fd3bc;--warn:#e0a85c;--code:#22262a;--box:#1d2a40;--box2:#173430;--box3:#3a2e1c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:0 20px 48px}
+header.hero{padding:56px 0 28px;border-bottom:1px solid var(--line)}
+h1{font-size:2.4rem;margin:0 0 8px}
+h2{margin:44px 0 12px;font-size:1.5rem;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{margin:0 0 6px;font-size:1.05rem}
+p.lead{font-size:1.15rem;color:var(--muted);max-width:760px}
+a{color:var(--accent)}
+nav a{margin-right:14px;font-size:.95rem}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card p{margin:0;color:var(--muted);font-size:.93rem}
+svg{width:100%;height:auto;display:block}
+svg text{fill:var(--fg);font:13px system-ui,sans-serif}
+svg .sub{fill:var(--muted);font-size:11px}
+svg .b1{fill:var(--box);stroke:var(--accent)}
+svg .b2{fill:var(--box2);stroke:var(--accent2)}
+svg .b3{fill:var(--box3);stroke:var(--warn)}
+svg .grp{fill:none;stroke:var(--line);stroke-dasharray:5 4}
+svg .ln{stroke:var(--muted);stroke-width:1.5;fill:none;marker-end:url(#arr)}
+svg #arr path{fill:var(--muted)}
+ol.pipe{counter-reset:s;list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+ol.pipe li{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:8px;padding:12px}
+ol.pipe li::before{counter-increment:s;content:counter(s) ". ";font-weight:600;color:var(--accent)}
+.timeline{border-left:2px solid var(--accent);margin-left:8px;padding-left:22px}
+.step{position:relative;margin-bottom:18px}
+.step::before{content:"";position:absolute;left:-29px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--accent)}
+.step p{margin:2px 0;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+th,td{text-align:left;border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.ok{color:var(--accent2);font-weight:600}
+ul.lim li{margin-bottom:5px}
+footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<header class="hero">
+<h1>webgd</h1>
+<p class="lead">An in-browser frame debugger for web pages that use WebGL2 or WebGPU. It is a Chrome MV3 extension plus a Rust/WASM egui UI. It captures one frame, replays it on webgd's own device up to any command, and shows render targets, pipeline state, bindings, resource contents and an estimated GPU trace.</p>
+<nav><a href="../README.md">README</a><a href="architecture.md">Architecture</a><a href="wire-format.md">Wire format</a><a href="user-guide.md">User guide</a><a href="development.md">Development</a><a href="../LICENSE">License</a></nav>
+</header>
+
+<h2 id="features">Features</h2>
+<div class="grid">
+<div class="card"><h3>Frame capture</h3><p>Every WebGL2/WebGPU call in one <code>requestAnimationFrame</code> frame, plus a frame-start snapshot of resource contents and state.</p></div>
+<div class="card"><h3>Command tree</h3><p>Grouped by passes, debug groups and page markers. Draws are bold, rows with replay errors are red, text filter.</p></div>
+<div class="card"><h3>Inspection</h3><p>Selecting a command replays to it and shows render targets, pipeline state and per-binding resources.</p></div>
+<div class="card"><h3>Resource browser</h3><p>Texture viewer (mip/layer, channels, range/Auto, zoom/pan, texel readout), buffer viewer (hex/u8/u16/u32/i32/f32/f16), shader source with estimated stats, programs, descriptor trees.</p></div>
+<div class="card"><h3>GPU trace</h3><p>Timeline with queue, pass, marker and item rows, and counter rows: Occupancy, ALU, Branches, Texture samples (all "(est.)") and Fragments.</p></div>
+<div class="card"><h3>Save / open</h3><p><code>.webgd</code> files are the raw wire bytes. A standalone mode opens them without the extension.</p></div>
+</div>
+
+<h2 id="architecture">Architecture</h2>
+<svg viewBox="0 0 960 420" role="img" aria-label="webgd architecture diagram">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z"/></marker></defs>
+<rect class="grp" x="10" y="20" width="330" height="380" rx="10"/>
+<text x="24" y="44">Target tab</text>
+<rect class="b3" x="40" y="64" width="270" height="56" rx="8"/>
+<text x="56" y="88">page JS</text><text class="sub" x="56" y="106">WebGL2 / WebGPU calls, rAF loop</text>
+<rect class="b1" x="40" y="160" width="270" height="70" rx="8"/>
+<text x="56" y="184">hook.js (MAIN world)</text><text class="sub" x="56" y="202">wraps prototypes, setup log, snapshot,</text><text class="sub" x="56" y="218">WireWriter</text>
+<rect class="b1" x="40" y="290" width="270" height="56" rx="8"/>
+<text x="56" y="314">bridge.js (ISOLATED world)</text><text class="sub" x="56" y="332">base64 chunks over a runtime Port</text>
+<path class="ln" d="M175 120V158"/><path class="ln" d="M175 230V288"/>
+<text class="sub" x="184" y="264">window.postMessage</text>
+<rect class="grp" x="390" y="20" width="560" height="380" rx="10"/>
+<text x="404" y="44">webgd tab (extension/ui/index.html)</text>
+<rect class="b1" x="420" y="64" width="500" height="80" rx="8"/>
+<text x="436" y="88">webgd-ui (eframe + egui_dock, wgpu)</text><text class="sub" x="436" y="108">port.rs: Port client, chunk reassembly</text><text class="sub" x="436" y="126">replay_queue.rs, panels/*</text>
+<rect class="b2" x="420" y="200" width="150" height="110" rx="8"/>
+<text x="434" y="224">webgd-core</text><text class="sub" x="434" y="244">wire decode, model,</text><text class="sub" x="434" y="260">call labels, pixels,</text><text class="sub" x="434" y="276">trackers (native)</text>
+<rect class="b2" x="595" y="200" width="150" height="110" rx="8"/>
+<text x="609" y="224">webgd-replay</text><text class="sub" x="609" y="244">replay via js_sys,</text><text class="sub" x="609" y="260">inspection, readback,</text><text class="sub" x="609" y="276">trace runner (wasm)</text>
+<rect class="b2" x="770" y="200" width="150" height="110" rx="8"/>
+<text x="784" y="224">webgd-analysis</text><text class="sub" x="784" y="244">naga WGSL, glsl-lang</text><text class="sub" x="784" y="260">GLSL stats, cost</text><text class="sub" x="784" y="276">model (native)</text>
+<path class="ln" d="M495 144V198"/><path class="ln" d="M670 144V198"/><path class="ln" d="M845 144V198"/>
+<path class="ln" d="M310 318C360 318 360 104 418 104"/>
+<text class="sub" x="330" y="380">Port "webgd-target"</text>
+<rect class="b3" x="420" y="340" width="500" height="44" rx="8"/>
+<text x="436" y="367">webgd's own WebGL2 contexts / GPUDevice (replay target)</text>
+<path class="ln" d="M670 310V338"/>
+</svg>
+<p>Details: <a href="architecture.md">architecture.md</a> and the byte-level format in <a href="wire-format.md">wire-format.md</a>.</p>
+
+<h2 id="pipeline">Capture, replay, inspect</h2>
+<ol class="pipe">
+<li><b>Arm.</b> The UI sends <code>capture</code>; bridge.js forwards <code>arm</code> to hook.js.</li>
+<li><b>Snapshot.</b> On the next rAF callback hook.js records pre-frame resource contents and GL state.</li>
+<li><b>Record.</b> Every call until the next rAF timestamp is recorded, then encoded as wire bytes.</li>
+<li><b>Transfer.</b> bridge.js sends base64 chunks; <code>port.rs</code> reassembles and <code>wire::decode</code> builds a <code>Capture</code>.</li>
+<li><b>Replay.</b> <code>webgd-replay</code> runs setup, snapshot and frame up to the selected command on fresh contexts/devices.</li>
+<li><b>Inspect.</b> Targets, pipeline, bindings and resources are read back from the replay state; the trace runs instrumented replays.</li>
+</ol>
+
+<h2 id="steps">What was built</h2>
+<p>Built by parallel agents against shared interface contracts, then integrated and verified end to end.</p>
+<div class="timeline">
+<div class="step"><h3>Step 0: Skeleton and toolchain</h3><p>Workspace, four crates, <code>xtask/src/main.rs</code> (<code>cargo xtask build</code>), <code>web/index.html</code>, <code>web/main.js</code>, <code>extension/manifest.json</code>, <code>extension/background.js</code>.</p></div>
+<div class="step"><h3>Step 1: Wire format and decoder</h3><p><code>crates/webgd-core/src/{capture,wire,display}.rs</code>, <code>tools/gen-wire-fixture.cjs</code>, <code>tests/fixtures/sample.wire</code>, <code>crates/webgd-core/tests/wire.rs</code>.</p></div>
+<div class="step"><h3>Step 2: Hook, bridge, transport</h3><p><code>extension/hook.js</code>, <code>extension/bridge.js</code>, <code>crates/webgd-ui/src/port.rs</code>, <code>files.rs</code>, <code>panels/capture.rs</code>.</p></div>
+<div class="step"><h3>Step 3: Frame-start snapshot</h3><p>WebGL2 state/resource and WebGPU buffer/texture readback in <code>extension/hook.js</code>.</p></div>
+<div class="step"><h3>Step 4: Command model and replay engine</h3><p><code>crates/webgd-core/src/track/commands.rs</code>, <code>crates/webgd-replay/src/{engine,js,value}.rs</code>, <code>gl/snapshot.rs</code>, <code>gpu/snapshot.rs</code>, <code>panels/commands.rs</code>, <code>panels/log.rs</code>.</p></div>
+<div class="step"><h3>Step 5: Inspection</h3><p><code>crates/webgd-core/src/pixels.rs</code>, <code>track/{gl,gpu}.rs</code>, <code>crates/webgd-replay/src/gl/inspect.rs</code>, <code>gpu/inspect.rs</code>, <code>crates/webgd-ui/src/replay_queue.rs</code>, <code>panels/inspect.rs</code>.</p></div>
+<div class="step"><h3>Step 6: Resource browser</h3><p><code>crates/webgd-core/src/track/resources.rs</code>, <code>panels/resources.rs</code>, <code>panels/viewer.rs</code>.</p></div>
+<div class="step"><h3>Step 7: GPU trace and estimated counters</h3><p><code>crates/webgd-analysis/src/{wgsl,glsl,model}.rs</code>, <code>crates/webgd-replay/src/trace.rs</code>, <code>panels/trace.rs</code>.</p></div>
+</div>
+
+<h2 id="verification">Verification results</h2>
+<table>
+<thead><tr><th>Check</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>cargo test</code></td><td class="ok">32 tests pass (analysis 16; core: wire 3, pixels 7, track 6)</td></tr>
+<tr><td><code>cargo clippy -p webgd-replay -p webgd-ui --target wasm32-unknown-unknown</code></td><td class="ok">clean (all crates)</td></tr>
+<tr><td><code>node tools/gen-wire-fixture.cjs &amp;&amp; git diff --exit-code tests/fixtures/sample.wire</code></td><td class="ok">byte-identical</td></tr>
+<tr><td><code>cargo xtask build</code></td><td class="ok">index.html, main.js, webgd_ui.js, webgd_ui_bg.wasm</td></tr>
+<tr><td>E2E live capture (Chrome 156)</td><td class="ok">both fixture pages captured; both replay to last command with 0 errors</td></tr>
+<tr><td>WebGPU drawIndexed inspection</td><td class="ok">256×256 rgba16float cube target; pipeline <code>triangle-list</code> + <code>depth24plus</code></td></tr>
+<tr><td>Stop inside pass (setPipeline before draw)</td><td class="ok">clear color only</td></tr>
+<tr><td>WebGL2 trace</td><td class="ok">sequential layout; <code>Fragments (rasterized, pre-depth)</code> up to 307200</td></tr>
+<tr><td>WebGPU trace (<code>--enable-webgpu-developer-features</code>)</td><td class="ok">real pass bars, non-zero ALU/occupancy</td></tr>
+</tbody>
+</table>
+
+<h2 id="limitations">Known limitations</h2>
+<ul class="lim">
+<li>Counters are estimates from a static cost model. Timing is measured on webgd's replay device, not the page's own submission.</li>
+<li>Chrome quantizes WebGPU timestamps (about 65 µs) unless <code>chrome://flags/#enable-webgpu-developer-features</code> is enabled.</li>
+<li>WebGPU occlusion results in Chrome are 0/1 visibility flags, so <code>Fragments (post-depth)</code> is 0 or 1.</li>
+<li>Passes with render bundles or occlusion queries are timed whole ("unsplit pass"). Independent WebGPU passes may show overlapping timestamps (GPU concurrency).</li>
+<li>depth24plus textures are not viewable. Pre-frame depth/stencil and MSAA contents are not captured (shown as a banner).</li>
+<li>GL errors are reported once per section.</li>
+<li>WebGL1 is detected but unsupported. Workers and OffscreenCanvas in workers are unsupported.</li>
+<li>Capture needs a visible tab driven by requestAnimationFrame; otherwise: <code>target does not render with requestAnimationFrame</code>.</li>
+<li>Each replayed <code>requestAdapter</code> gets a fresh adapter.</li>
+</ul>
+
+<h2 id="quickstart">Quick start</h2>
+<p>Requires Rust 1.99+ (edition 2024), Node, and Chrome 121 or newer.</p>
+<pre><code>rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.130 --locked
+cargo xtask build
+python3 -m http.server 8000 --directory tests/pages</code></pre>
+<p>Open <code>chrome://extensions</code>, enable Developer mode, Load unpacked, select <code>extension/</code>. Reload pages opened before install, open <code>http://localhost:8000/webgpu.html</code> or <code>webgl2.html</code>, then click the webgd toolbar action. Standalone UI (no live capture): <code>python3 -m http.server 8080 --directory extension/ui</code>. More in <a href="user-guide.md">user-guide.md</a> and <a href="development.md">development.md</a>.</p>
+
+<h2 id="layout">Repository layout</h2>
+<pre><code>crates/webgd-core/      capture model, wire.rs, display.rs, pixels.rs, track/ (native-testable)
+crates/webgd-analysis/  naga WGSL + glsl-lang GLSL analysis, model.rs (native-testable)
+crates/webgd-replay/    engine.rs, js.rs, value.rs, gl/, gpu/, trace.rs (wasm only)
+crates/webgd-ui/        eframe app, port.rs, replay_queue.rs, panels/ (wasm cdylib)
+xtask/                  cargo xtask build [--release]
+extension/              manifest.json, hook.js, bridge.js, background.js; ui/ is build output
+web/                    index.html, main.js (UI host templates)
+tests/pages/            webgl2.html, webgpu.html, common.js
+tests/fixtures/         sample.wire
+tools/                  gen-wire-fixture.cjs</code></pre>
+
+<footer>webgd is released under the <a href="../LICENSE">MIT License</a>. Copyright 2026 snowapril.</footer>
+</main>
+</body>
+</html>
