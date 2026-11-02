@@ -387,13 +387,10 @@ fn gl_texture_dims() {
         (d.target, d.internalformat, d.format, d.ty),
         (TEXTURE_2D, 32856, Some(6408), Some(5121))
     );
-    // Before frame call 0 is applied: snapshot dims. (No index before 0; use texture 2 with an empty frame.)
-    let mut snap_only = b.cap.clone();
-    snap_only.frame.clear();
-    assert_eq!(
-        texture_dims(&snap_only, 0, ObjId(2)).unwrap().levels[&(0, 0)],
-        (64, 64, 1)
-    );
+    // Frame start: frame[0] redefines tex 2 as 128x64, but frame-start dims stay the snapshot's 64x64.
+    let fs = webgd_core::track::gl::texture_dims_at_frame_start(&b.cap, ObjId(2)).unwrap();
+    assert_eq!(fs.levels[&(0, 0)], (64, 64, 1));
+    assert_eq!(fs.levels[&(1, 0)], (32, 32, 1));
 
     assert_eq!(texture_dims(&b.cap, 2, ObjId(3)), None);
     let c = texture_dims(&b.cap, 3, ObjId(3)).unwrap();

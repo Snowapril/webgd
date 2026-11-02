@@ -9,7 +9,7 @@ use egui::{Color32, Pos2, Rect, RichText, Sense, TextStyle, Vec2, vec2};
 use std::collections::HashMap;
 use webgd_analysis::{Stage, StageStats};
 use webgd_core::pixels::{Image, f16_to_f64};
-use webgd_core::track::gl::{TEXTURE_2D_ARRAY, TEXTURE_3D, TEXTURE_CUBE_MAP, TexDims};
+use webgd_core::track::gl::{TEXTURE_2D_ARRAY, TEXTURE_3D, TEXTURE_CUBE_MAP};
 use webgd_core::track::resources::wgsl_entry_points;
 use webgd_core::track::revisions::{self, Access, Revision};
 use webgd_core::{Call, Capture, ObjId, Section, Value};
@@ -420,18 +420,6 @@ fn base_texture(cap: &Capture, id: ObjId) -> ObjId {
     }
 }
 
-/// GL texture dims at frame start: the snapshot `webgd:glTexture` record (absent → not live at frame start).
-fn frame_start_gl_dims(cap: &Capture, tex: ObjId) -> Option<TexDims> {
-    cap.snapshot
-        .iter()
-        .rfind(|c| {
-            cap.method(c) == "webgd:glTexture"
-                && c.args.first().and_then(Value::as_obj) == Some(tex)
-        })
-        .and_then(|c| c.args.get(1))
-        .and_then(|d| webgd_core::track::gl::snapshot_dims(cap, d))
-}
-
 /// (mip count, layer count, layers are cube faces) at `stop` (`None` = frame start).
 fn tex_extent(cap: &Capture, id: ObjId, stop: Option<usize>, mip: u32) -> (u32, u32, bool) {
     let tex = base_texture(cap, id);
@@ -465,7 +453,7 @@ fn tex_extent(cap: &Capture, id: ObjId, stop: Option<usize>, mip: u32) -> (u32, 
         "WebGLTexture" => {
             let dims = match stop {
                 Some(s) => webgd_core::track::gl::texture_dims(cap, s, tex),
-                None => frame_start_gl_dims(cap, tex),
+                None => webgd_core::track::gl::texture_dims_at_frame_start(cap, tex),
             };
             let Some(d) = dims else {
                 return (1, 1, false);

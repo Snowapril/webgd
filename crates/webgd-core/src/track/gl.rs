@@ -278,6 +278,16 @@ pub fn snapshot_dims(cap: &Capture, desc: &Value) -> Option<TexDims> {
 /// Dims of GL texture `id` as of `frame[index]` (inclusive). Starts from the snapshot
 /// `webgd:glTexture` record and the setup log, then applies frame texImage*/texStorage* calls.
 pub fn texture_dims(cap: &Capture, index: usize, id: ObjId) -> Option<TexDims> {
+    dims_through(cap, Some(index), id)
+}
+
+/// Dims of GL texture `id` at frame start (setup log + snapshot, no frame calls).
+pub fn texture_dims_at_frame_start(cap: &Capture, id: ObjId) -> Option<TexDims> {
+    dims_through(cap, None, id)
+}
+
+/// `index = None` stops before `frame[0]`.
+fn dims_through(cap: &Capture, index: Option<usize>, id: ObjId) -> Option<TexDims> {
     let mut t = Tracker::default();
     for call in &cap.setup {
         t.apply(cap, call, id);
@@ -297,7 +307,7 @@ pub fn texture_dims(cap: &Capture, index: usize, id: ObjId) -> Option<TexDims> {
             _ => {}
         }
     }
-    let end = index.saturating_add(1).min(cap.frame.len());
+    let end = index.map_or(0, |i| i.saturating_add(1).min(cap.frame.len()));
     for call in &cap.frame[..end] {
         t.apply(cap, call, id);
     }

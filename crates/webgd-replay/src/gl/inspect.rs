@@ -684,7 +684,7 @@ pub fn read_buffer(
 pub fn read_image(
     ctx: &GlCtx,
     cap: &Capture,
-    stop: usize,
+    stop: Option<usize>,
     id: ObjId,
     obj: &JsValue,
     mip: u32,
@@ -698,7 +698,11 @@ pub fn read_image(
         let class = read_class(ifmt).ok_or("depth/stencil not readable in WebGL2")?;
         return ctx.read_attachment(&Attach::Rb(obj.clone()), w, h, class);
     }
-    let d = texture_dims(cap, stop, id).ok_or("texture dimensions unknown")?;
+    let d = match stop {
+        Some(s) => texture_dims(cap, s, id),
+        None => webgd_core::track::gl::texture_dims_at_frame_start(cap, id),
+    }
+    .ok_or("texture dimensions unknown")?;
     let class = read_class(d.internalformat).ok_or("depth/stencil not readable in WebGL2")?;
     let (face, layer) = if d.target == TEXTURE_CUBE_MAP {
         (layer.min(5), 0)

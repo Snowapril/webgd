@@ -296,7 +296,8 @@ impl ReplayState {
                     .rt
                     .gl_index(cap, id)
                     .ok_or_else(|| ReplayError::Unsupported("no GL context".into()))?;
-                gl::inspect::read_image(&self.rt.gl[g], cap, self.stop, id, obj, mip, layer)
+                let stop = (!self.frame_start).then_some(self.stop);
+                gl::inspect::read_image(&self.rt.gl[g], cap, stop, id, obj, mip, layer)
                     .map_err(js_err)
             }
             c => Err(ReplayError::Unsupported(format!("{c} is not a texture"))),

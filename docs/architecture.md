@@ -333,7 +333,7 @@ Readback works at the replayed point:
 
 - `read_texture`:
   - GPU textures: `copyTextureToBuffer` with 256-byte row alignment into a `MAP_READ` staging buffer (label `webgd:readback`), then rows are de-padded. Formats that `pixels::gpu_format` does not know return `format not viewable (<format>)`.
-  - GL textures and renderbuffers: read through the scratch FBO, sized by `webgd_core::track::gl::texture_dims`.
+  - GL textures and renderbuffers: read through the scratch FBO, sized by `webgd_core::track::gl::texture_dims` (or `texture_dims_at_frame_start` for a frame-start state, so a `frame[0]` that redefines a texture does not change the frame-start size).
 - `read_buffer`: `copyBufferToBuffer` for GPU buffers, `getBufferSubData` for GL buffers.
 
 ### Frame-start replay
