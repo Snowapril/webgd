@@ -17,6 +17,6 @@ wgpu.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
-web-sys = { workspace = true, features = ["Window", "Document", "HtmlCanvasElement", "HtmlInputElement", "HtmlAnchorElement", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "Element", "console"] }
+web-sys = { workspace = true, features = ["Window", "Document", "HtmlCanvasElement", "HtmlInputElement", "HtmlAnchorElement", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "Element", "HtmlElement", "Node", "console"] }
 base64.workspace = true
 log.workspace = true

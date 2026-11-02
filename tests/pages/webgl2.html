@@ -1,0 +1,178 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>webgd fixture: WebGL2</title>
+<style>html, body { margin: 0; background: #222; }</style>
+</head>
+<body>
+<canvas id="c" width="640" height="480"></canvas>
+<script src="common.js"></script>
+<script>
+'use strict';
+const gl = document.getElementById('c').getContext('webgl2');
+if (!gl) throw new Error('WebGL2 unavailable');
+if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('EXT_color_buffer_float unavailable');
+
+function program(vsSrc, fsSrc) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vsSrc], [gl.FRAGMENT_SHADER, fsSrc]]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+// --- Pass 1: rotating cube into an RGBA16F 256x256 target + DEPTH_COMPONENT24 renderbuffer.
+const cubeProg = program(`#version 300 es
+layout(std140) uniform Globals { mat4 mvp; vec4 tint; };
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec2 aUv;
+out vec2 vUv;
+void main() { vUv = aUv; gl_Position = mvp * vec4(aPos, 1.0); }
+`, `#version 300 es
+precision highp float;
+layout(std140) uniform Globals { mat4 mvp; vec4 tint; };
+uniform sampler2D uChecker;
+in vec2 vUv;
+out vec4 oColor;
+void main() { oColor = texture(uChecker, vUv) * tint; }
+`);
+gl.uniformBlockBinding(cubeProg, gl.getUniformBlockIndex(cubeProg, 'Globals'), 0);
+const uChecker = gl.getUniformLocation(cubeProg, 'uChecker');
+gl.useProgram(cubeProg);
+gl.uniform1i(uChecker, 0);
+
+const cube = webgdFixture.cube();
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, cube.vertices, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 20, 0);
+gl.enableVertexAttribArray(1);
+gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 12);
+const ibo = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cube.indices, gl.STATIC_DRAW);
+gl.bindVertexArray(null);
+
+const ubo = gl.createBuffer();
+gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+gl.bufferData(gl.UNIFORM_BUFFER, 80, gl.DYNAMIC_DRAW);
+gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
+
+const checker = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, checker);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 64, 64, 0, gl.RGBA, gl.UNSIGNED_BYTE, webgdFixture.checker(64));
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+const sampler = gl.createSampler();
+gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, gl.REPEAT);
+gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, gl.REPEAT);
+
+const sceneTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 256, 256, 0, gl.RGBA, gl.HALF_FLOAT, null);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+const depthRb = gl.createRenderbuffer();
+gl.bindRenderbuffer(gl.RENDERBUFFER, depthRb);
+gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, 256, 256);
+const fbo = gl.createFramebuffer();
+gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex, 0);
+gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthRb);
+if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('offscreen FBO incomplete');
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+// --- Pass 2: fullscreen triangle sampling the scene texture and a 4x4 LUMINANCE texture.
+const compProg = program(`#version 300 es
+out vec2 vUv;
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vUv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+`, `#version 300 es
+precision highp float;
+uniform sampler2D uScene;
+uniform sampler2D uLum;
+in vec2 vUv;
+out vec4 oColor;
+void main() {
+  float l = texture(uLum, vUv).r;
+  oColor = vec4(texture(uScene, vUv).rgb * (0.5 + 0.5 * l), 1.0);
+}
+`);
+gl.useProgram(compProg);
+gl.uniform1i(gl.getUniformLocation(compProg, 'uScene'), 0);
+gl.uniform1i(gl.getUniformLocation(compProg, 'uLum'), 1);
+const lumTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, lumTex);
+gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+const lum = new Uint8Array(16);
+for (let i = 0; i < 16; i++) lum[i] = (i * 17) & 255;
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 4, 4, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, lum);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+const emptyVao = gl.createVertexArray();
+
+const start = performance.now();
+function frame(now) {
+  const t = (now - start) / 1000;
+  const globals = new Float32Array(20);
+  globals.set(webgdFixture.mvp(t, 1), 0);
+  globals.set([1, 0.85, 0.7, t], 16);
+
+  window.__webgd?.pushMarker('Offscreen');
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.viewport(0, 0, 256, 256);
+  gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0.1, 0.1, 0.15, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(cubeProg);
+  gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+  gl.bufferSubData(gl.UNIFORM_BUFFER, 0, globals);
+  gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, checker);
+  gl.bindSampler(0, sampler);
+  gl.bindVertexArray(vao);
+  gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+  gl.bindVertexArray(null);
+  gl.bindSampler(0, null);
+  window.__webgd?.popMarker();
+
+  window.__webgd?.pushMarker('Composite');
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(compProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, lumTex);
+  gl.bindVertexArray(emptyVao);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.bindVertexArray(null);
+  gl.activeTexture(gl.TEXTURE0);
+  window.__webgd?.popMarker();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -3042,10 +3042,8 @@ name = "webgd-replay"
 version = "0.1.0"
 dependencies = [
  "js-sys",
- "log",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "web-sys",
  "webgd-analysis",
  "webgd-core",
 ]

@@ -1,5 +1,7 @@
 //! Shader static analysis and the estimated-counter model.
+mod glsl;
 pub mod model;
+mod wgsl;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Stage {
@@ -30,14 +32,15 @@ pub enum AnalysisError {
     AmbiguousEntry,
 }
 
+/// Static stats for a WGSL entry point. `entry = None` picks the single entry
+/// point of `stage` ([`AnalysisError::AmbiguousEntry`] if there are several).
 pub fn wgsl_stats(src: &str, entry: Option<&str>, stage: Stage) -> Result<StageStats, AnalysisError> {
-    let _ = (src, entry, stage);
-    todo!("analysis agent")
+    wgsl::stats(src, entry, stage)
 }
 
+/// Static stats for a GLSL (ES 3.00) shader; the entry point is `main`.
 pub fn glsl_stats(src: &str, stage: Stage) -> Result<StageStats, AnalysisError> {
-    let _ = (src, stage);
-    todo!("analysis agent")
+    glsl::stats(src, stage)
 }
 
 pub use model::occupancy;

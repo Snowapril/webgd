@@ -9,5 +9,3 @@ webgd-analysis.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
-web-sys = { workspace = true, features = ["console", "Window"] }
-log.workspace = true
