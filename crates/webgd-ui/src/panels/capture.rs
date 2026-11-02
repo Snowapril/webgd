@@ -1,6 +1,7 @@
 //! Capture tab: live targets, open/save `.webgd`.
 use crate::port::CaptureProgress;
 use crate::state::AppState;
+use crate::widgets::{ACCENT, ERROR, WARN};
 use egui::{Color32, RichText};
 
 pub fn show(ui: &mut egui::Ui, st: &mut AppState) {
@@ -23,24 +24,33 @@ pub fn show(ui: &mut egui::Ui, st: &mut AppState) {
         }
     });
     if !st.status.is_empty() {
-        ui.label(&st.status);
+        ui.weak(&st.status);
     }
     if let Some(l) = &st.loaded {
-        if l.source == l.cap.url {
-            ui.label(format!("Current capture: {}", l.cap.url));
-        } else {
-            ui.label(format!("Current capture: {} ({})", l.cap.url, l.source));
-        }
+        ui.add_space(4.0);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("Current capture").strong());
+            ui.label(RichText::new(&l.cap.url).monospace());
+            if l.source != l.cap.url {
+                ui.weak(format!("source: {}", l.source));
+            }
+            ui.weak(format!(
+                "{} setup · {} snapshot · {} frame calls · {} resources",
+                l.cap.setup.len(),
+                l.cap.snapshot.len(),
+                l.cap.frame.len(),
+                l.resources.len()
+            ));
+        });
     }
     ui.separator();
     if st.port.standalone {
-        ui.label(
-            RichText::new("standalone mode: live capture unavailable").color(crate::widgets::WARN),
-        );
+        ui.label(RichText::new("standalone mode: live capture unavailable").color(WARN));
         return;
     }
     ui.horizontal(|ui| {
-        ui.heading("Targets");
+        ui.label(RichText::new("Targets").strong());
         if ui
             .small_button("Refresh")
             .on_hover_text("Ask every tab's bridge to reconnect")
@@ -72,7 +82,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut AppState) {
                             ui.weak(format!("tab {id}"));
                         }
                     });
-                    ui.weak(&t.url);
+                    ui.add(egui::Label::new(RichText::new(&t.url).weak().small()).truncate());
                     ui.horizontal(|ui| {
                         let s = t.status;
                         ui.label(format!("gl2: {}", s.gl2));
@@ -80,7 +90,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut AppState) {
                         if s.webgl1 > 0 {
                             ui.label(
                                 RichText::new(format!("webgl1: {} (unsupported)", s.webgl1))
-                                    .color(crate::widgets::WARN),
+                                    .color(WARN),
                             );
                         }
                     });
@@ -90,7 +100,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut AppState) {
                             CaptureProgress::Armed | CaptureProgress::Receiving { .. }
                         );
                         let usable = t.status.gl2 + t.status.gpu_devices > 0;
-                        let btn = ui.add_enabled(!busy && usable, egui::Button::new("Capture"));
+                        let btn = ui.add_enabled(
+                            !busy && usable,
+                            egui::Button::new(RichText::new("Capture frame").color(Color32::WHITE))
+                                .fill(ACCENT),
+                        );
                         if btn.clicked() {
                             capture = Some(t.key);
                         }
@@ -109,10 +123,10 @@ pub fn show(ui: &mut egui::Ui, st: &mut AppState) {
                                 );
                             }
                             CaptureProgress::Failed(m) => {
-                                ui.label(RichText::new(m).color(Color32::LIGHT_RED));
+                                ui.label(RichText::new(m).color(ERROR));
                             }
                             CaptureProgress::Done => {
-                                ui.label("captured");
+                                ui.weak("captured");
                             }
                         }
                     });

@@ -59,10 +59,10 @@ footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:v
 <h2 id="features">Features</h2>
 <div class="grid">
 <div class="card"><h3>Frame capture</h3><p>Every WebGL2/WebGPU call in one <code>requestAnimationFrame</code> frame, plus a frame-start snapshot of resource contents and state.</p></div>
-<div class="card"><h3>Command tree</h3><p>Grouped by passes, debug groups and page markers. Draws are bold, rows with replay errors are red, text filter.</p></div>
-<div class="card"><h3>Inspection</h3><p>Selecting a command replays to it and shows render targets, pipeline state and per-binding resources.</p></div>
-<div class="card"><h3>Resource browser</h3><p>Texture viewer (mip/layer, channels, range/Auto, zoom/pan, texel readout), buffer viewer (hex/u8/u16/u32/i32/f32/f16), shader source with estimated stats, programs, descriptor trees.</p></div>
-<div class="card"><h3>GPU trace</h3><p>Timeline with queue, pass, marker and item rows, and counter rows: Occupancy, ALU, Branches, Texture samples (all "(est.)") and Fragments.</p></div>
+<div class="card"><h3>Events and scrubber</h3><p>Events panel with <code>#</code>, kind strip, label and GPU Duration columns, <code>Actions only</code>, collapse/expand, filter and a selectable <code>Pre-frame setup</code> group. A scrubber strip of actions sized by GPU duration after a trace.</p></div>
+<div class="card"><h3>API Inspector</h3><p>Selecting an event replays to it. Stage list (Input Assembly, Vertex Shader, Rasterizer, Fragment Shader, Depth/Stencil, Color Output, or Compute Shader / Dispatch) with resource links, plus Render Targets with thumbnails and a large preview.</p></div>
+<div class="card"><h3>Resource browser</h3><p>Resources table with Origin, Revisions and Last write columns. Texture viewer (mip/layer, channels, range/Auto, zoom/pan, texel readout), buffer viewer (hex/u8/u16/u32/i32/f32/f16), shaders, programs, descriptor trees, and a per-resource revision history.</p></div>
+<div class="card"><h3>GPU trace</h3><p>Timeline with collapsible queue groups and a counters group (Occupancy, ALU, Branches, Texture samples, all "(est.)", and Fragments), crosshair, adaptive ruler and range selection with a Range summary.</p></div>
 <div class="card"><h3>Save / open</h3><p><code>.webgd</code> files are the raw wire bytes. A standalone mode opens them without the extension.</p></div>
 </div>
 
@@ -108,6 +108,12 @@ footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:v
 <li><b>Inspect.</b> Targets, pipeline, bindings and resources are read back from the replay state; the trace runs instrumented replays.</li>
 </ol>
 
+<h2 id="ui">UI and revision history</h2>
+<p><b>Workspaces.</b> A top menu bar has File (<code>Open .webgd…</code>, <code>Save .webgd</code>; Ctrl/Cmd+O), Capture (<code>Refresh targets</code>, <code>Show Capture panel</code>, one entry per live target with gl2/gpu counts) and Window (focus any tab). It also switches between the <b>Frame Debugger</b> and <b>GPU Trace</b> workspaces, and each one keeps its own dock layout. The bottom status bar shows the source URL, the position (<code>Event i / N</code>, <code>Pre-frame setup call #k</code>, <code>Frame start</code>, <code>Frame end</code>), replay status and an error count that opens the Log when clicked. Home/End select the first or last event.</p>
+<p><b>Panels.</b> Events, Scrubber (click/drag to select, Left/Right to step), API Inspector, Render Targets (Fit / 1:1, <code>Open in Resource Viewer</code>, texel readout), Resources (<code>Written in frame</code> toggle; double-click selects the last write), Resource Viewer, GPU Trace, and Log (Errors/Warnings/Notes chips and a filter; clicking an error row selects its command).</p>
+<p><b>Revision click-through.</b> <code>webgd_core::track::revisions</code> (<code>all</code>, <code>revision_at</code>, <code>Revision</code>, <code>Access</code>) lists every create/write/read/destroy access to a resource in the pre-frame and frame sections. The Resource Viewer shows them in a Revisions side panel (Rev, Section, Event, Access, Call, detail). Clicking a frame revision selects that command. Clicking a pre-frame revision selects the setup call and shows the contents at frame start, using <code>Replayer::replay_to_frame_start</code>. ← / → jump between writes. The header reads <code>Revision r · contents at command #idx</code> or <code>contents at frame start</code>.</p>
+<p><b>Trace range summary.</b> Drag on the ruler, or shift+drag, to select a time range. Esc clears it, and <code>Zoom to range</code> / <code>Clear range</code> act on it. The Range summary shows the duration, the item count, the average and total for each counter, and the 10 longest items. Clicking one of them selects its command.</p>
+
 <h2 id="steps">What was built</h2>
 <p>Built by parallel agents against shared interface contracts, then integrated and verified end to end.</p>
 <div class="timeline">
@@ -119,13 +125,14 @@ footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:v
 <div class="step"><h3>Step 5: Inspection</h3><p><code>crates/webgd-core/src/pixels.rs</code>, <code>track/{gl,gpu}.rs</code>, <code>crates/webgd-replay/src/gl/inspect.rs</code>, <code>gpu/inspect.rs</code>, <code>crates/webgd-ui/src/replay_queue.rs</code>, <code>panels/inspect.rs</code>.</p></div>
 <div class="step"><h3>Step 6: Resource browser</h3><p><code>crates/webgd-core/src/track/resources.rs</code>, <code>panels/resources.rs</code>, <code>panels/viewer.rs</code>.</p></div>
 <div class="step"><h3>Step 7: GPU trace and estimated counters</h3><p><code>crates/webgd-analysis/src/{wgsl,glsl,model}.rs</code>, <code>crates/webgd-replay/src/trace.rs</code>, <code>panels/trace.rs</code>.</p></div>
+<div class="step"><h3>Step 8: UI overhaul and revision history</h3><p><code>crates/webgd-core/src/track/revisions.rs</code>, <code>crates/webgd-core/tests/revisions.rs</code>, <code>crates/webgd-ui/src/panels/scrubber.rs</code>; rewritten <code>crates/webgd-ui/src/{app,state,widgets}.rs</code> and <code>panels/{commands,inspect,resources,viewer,trace,log,capture}.rs</code>; frame-start replay (<code>replay_to_frame_start</code>, <code>ReplayState.frame_start</code>) in <code>crates/webgd-replay/src/lib.rs</code>.</p></div>
 </div>
 
 <h2 id="verification">Verification results</h2>
 <table>
 <thead><tr><th>Check</th><th>Result</th></tr></thead>
 <tbody>
-<tr><td><code>cargo test</code></td><td class="ok">32 tests pass (analysis 16; core: wire 3, pixels 7, track 6)</td></tr>
+<tr><td><code>cargo test</code></td><td class="ok">39 tests pass (analysis 16; core 23: wire 3, pixels 7, revisions 7, track 6)</td></tr>
 <tr><td><code>cargo clippy -p webgd-replay -p webgd-ui --target wasm32-unknown-unknown</code></td><td class="ok">clean (all crates)</td></tr>
 <tr><td><code>node tools/gen-wire-fixture.cjs &amp;&amp; git diff --exit-code tests/fixtures/sample.wire</code></td><td class="ok">byte-identical</td></tr>
 <tr><td><code>cargo xtask build</code></td><td class="ok">index.html, main.js, webgd_ui.js, webgd_ui_bg.wasm</td></tr>

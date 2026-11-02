@@ -1,7 +1,8 @@
 //! In-memory capture model decoded from the wire format.
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+/// Object id; `ObjId(0)` (the default) means "no object".
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
 pub struct ObjId(pub u32);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -156,28 +157,43 @@ pub struct Capture {
 
 impl Capture {
     pub fn str(&self, s: Sym) -> &str {
-        self.strings.get(s.0 as usize).map(String::as_str).unwrap_or("")
+        self.strings
+            .get(s.0 as usize)
+            .map(String::as_str)
+            .unwrap_or("")
     }
 
     /// Class name of an object; "" for unknown ids.
     pub fn class_of(&self, id: ObjId) -> &str {
-        self.objects.get(&id).map(|o| self.str(o.class)).unwrap_or("")
+        self.objects
+            .get(&id)
+            .map(|o| self.str(o.class))
+            .unwrap_or("")
     }
 
     pub fn blob(&self, id: u32) -> &[u8] {
-        self.blobs.get(id as usize).map(Vec::as_slice).unwrap_or(&[])
+        self.blobs
+            .get(id as usize)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn dict_get<'a>(&self, v: &'a Value, key: &str) -> Option<&'a Value> {
         match v {
-            Value::Dict(entries) => entries.iter().find(|(k, _)| self.str(*k) == key).map(|(_, v)| v),
+            Value::Dict(entries) => entries
+                .iter()
+                .find(|(k, _)| self.str(*k) == key)
+                .map(|(_, v)| v),
             _ => None,
         }
     }
 
     /// Looks up an interned string; `None` if never interned.
     pub fn sym(&self, s: &str) -> Option<Sym> {
-        self.strings.iter().position(|x| x == s).map(|i| Sym(i as u32))
+        self.strings
+            .iter()
+            .position(|x| x == s)
+            .map(|i| Sym(i as u32))
     }
 
     pub fn method(&self, call: &Call) -> &str {

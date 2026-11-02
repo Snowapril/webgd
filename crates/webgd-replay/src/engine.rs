@@ -3,7 +3,7 @@ use crate::gl::{self, GlCtx};
 use crate::js::{self, AwaitError};
 use crate::trace::Instr;
 use crate::value::to_js;
-use crate::{gpu, ObjMap, ReplayError, ReplayMode, ReplayState, Runtime};
+use crate::{ObjMap, ReplayError, ReplayMode, ReplayState, Runtime, gpu};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -60,10 +60,14 @@ impl Engine {
         Engine {
             cap: cap.clone(),
             st: ReplayState {
-                objs: ObjMap { fwd: HashMap::new(), rev: js_sys::Map::new() },
+                objs: ObjMap {
+                    fwd: HashMap::new(),
+                    rev: js_sys::Map::new(),
+                },
                 errors: Vec::new(),
                 notes: HashMap::new(),
                 stop: 0,
+                frame_start: false,
                 rt: Runtime::default(),
             },
             pending: HashMap::new(),
@@ -80,7 +84,8 @@ impl Engine {
         }
     }
 
-    pub async fn run(mut self, stop: usize) -> ReplayState {
+    /// `stop = None` replays setup + snapshot only (frame start); `Some(i)` also runs `frame[0..=i]`.
+    pub async fn run(mut self, stop: Option<usize>) -> ReplayState {
         let cap = self.cap.clone();
         // Navigator GPU objects and initial canvas sizes.
         let gpu_js = js::get(&js::get(&js::global(), "navigator"), "gpu");
@@ -105,22 +110,36 @@ impl Engine {
         self.apply_snapshot().await;
         self.check_gl_errors(usize::MAX, "snapshot: ");
 
-        let stop = stop.min(cap.frame.len().saturating_sub(1));
-        self.st.stop = stop;
-        if !cap.frame.is_empty() {
-            for (i, call) in cap.frame[..=stop].iter().enumerate() {
-                self.exec(call, i, Section::Frame).await;
+        let stop = match stop {
+            Some(stop) => {
+                let stop = stop.min(cap.frame.len().saturating_sub(1));
+                if !cap.frame.is_empty() {
+                    for (i, call) in cap.frame[..=stop].iter().enumerate() {
+                        self.exec(call, i, Section::Frame).await;
+                    }
+                }
+                self.pos.set((stop, Section::Frame));
+                stop
             }
-        }
-        self.pos.set((stop, Section::Frame));
+            None => {
+                self.st.frame_start = true;
+                0
+            }
+        };
+        self.st.stop = stop;
         self.terminate().await;
-        self.check_gl_errors(stop, "");
+        if self.st.frame_start {
+            self.check_gl_errors(usize::MAX, "frame start: ");
+        } else {
+            self.check_gl_errors(stop, "");
+        }
         if self.instr.is_some() {
             self.trace_collect().await;
         }
         // Let queued uncapturederror events fire.
         for dev in self.st.rt.devices.clone() {
-            let p = js::call(&js::get(&dev, "queue"), "onSubmittedWorkDone", &[]).unwrap_or_default();
+            let p =
+                js::call(&js::get(&dev, "queue"), "onSubmittedWorkDone", &[]).unwrap_or_default();
             let _ = js::await_promise(&p, 2000.0).await;
         }
         js::sleep(1.0).await;
@@ -152,7 +171,12 @@ impl Engine {
     }
 
     pub fn obj(&self, id: ObjId) -> Result<JsValue, String> {
-        self.st.objs.fwd.get(&id).cloned().ok_or_else(|| format!("{}#{} not mapped in replay", self.cap.class_of(id), id.0))
+        self.st
+            .objs
+            .fwd
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| format!("{}#{} not mapped in replay", self.cap.class_of(id), id.0))
     }
 
     pub fn arg(&self, v: &Value) -> Result<JsValue, String> {
@@ -179,7 +203,11 @@ impl Engine {
                 if e == 0 {
                     break;
                 }
-                found.push(format!("{prefix}GL error {} on WebGL2RenderingContext#{}", gl::enum_name(e), ctx.id.0));
+                found.push(format!(
+                    "{prefix}GL error {} on WebGL2RenderingContext#{}",
+                    gl::enum_name(e),
+                    ctx.id.0
+                ));
             }
         }
         for m in found {
@@ -199,7 +227,14 @@ impl Engine {
         }
     }
 
-    async fn dispatch(&mut self, call: &Call, method: &str, class: &str, index: usize, sec: Section) -> R {
+    async fn dispatch(
+        &mut self,
+        call: &Call,
+        method: &str,
+        class: &str,
+        index: usize,
+        sec: Section,
+    ) -> R {
         if let Some(i) = self.gl_index(call.this) {
             self.last_gl = Some(i);
         }
@@ -207,7 +242,11 @@ impl Engine {
             "webgd:resolved" => {
                 let token = call.args.first().and_then(Value::as_f64).unwrap_or(-1.0) as u32;
                 if let Some(Value::ObjRef(id)) = call.args.get(1) {
-                    let v = self.pending.get(&token).cloned().ok_or_else(|| format!("promise {token} has no replay value"))?;
+                    let v = self
+                        .pending
+                        .get(&token)
+                        .cloned()
+                        .ok_or_else(|| format!("promise {token} has no replay value"))?;
                     self.map(*id, v);
                 }
                 return Ok(());
@@ -246,20 +285,34 @@ impl Engine {
             }
             "webgd:mappedWrite" => {
                 let off = call.args.first().and_then(Value::as_f64).unwrap_or(0.0) as u64;
-                let ab = self.mapped.get(&(call.this, off)).cloned().ok_or("no mapped range at offset")?;
+                let ab = self
+                    .mapped
+                    .get(&(call.this, off))
+                    .cloned()
+                    .ok_or("no mapped range at offset")?;
                 let data = self.arg(call.args.get(1).unwrap_or(&Value::Undefined))?;
-                js::call(&js::construct("Uint8Array", &[ab]).map_err(jserr)?, "set", &[data]).map_err(jserr)?;
+                js::call(
+                    &js::construct("Uint8Array", &[ab]).map_err(jserr)?,
+                    "set",
+                    &[data],
+                )
+                .map_err(jserr)?;
                 return Ok(());
             }
             "webgd:bindForUpload" => {
                 let i = self.gl_index(call.this).ok_or("not a WebGL2 context")?;
                 let mut target = call.args.first().and_then(Value::as_f64).unwrap_or(0.0) as u32;
-                if (gl::c::TEXTURE_CUBE_MAP_POSITIVE_X..gl::c::TEXTURE_CUBE_MAP_POSITIVE_X + 6).contains(&target) {
+                if (gl::c::TEXTURE_CUBE_MAP_POSITIVE_X..gl::c::TEXTURE_CUBE_MAP_POSITIVE_X + 6)
+                    .contains(&target)
+                {
                     target = gl::c::TEXTURE_CUBE_MAP;
                 }
                 let tex = self.arg(call.args.get(1).unwrap_or(&Value::Null))?;
                 let ctx = &self.st.rt.gl[i];
-                ctx.c("activeTexture", &[(gl::c::TEXTURE0 + ctx.scratch_unit) as f64]);
+                ctx.c(
+                    "activeTexture",
+                    &[(gl::c::TEXTURE0 + ctx.scratch_unit) as f64],
+                );
                 ctx.bind_tex(target, &tex);
                 return Ok(());
             }
@@ -267,7 +320,9 @@ impl Engine {
                 let i = self.gl_index(call.this).ok_or("not a WebGL2 context")?;
                 if let Some(Value::Dict(entries)) = call.args.first() {
                     for (k, v) in entries {
-                        let Ok(pname) = self.cap.str(*k).parse::<u32>() else { continue };
+                        let Ok(pname) = self.cap.str(*k).parse::<u32>() else {
+                            continue;
+                        };
                         let v = self.arg(v)?;
                         let _ = self.st.rt.gl[i].call("pixelStorei", &[gl::n(pname), v]);
                     }
@@ -290,7 +345,10 @@ impl Engine {
                 _ => {}
             }
         }
-        if sec == Section::Frame && self.instr.is_some() && self.trace_gpu(call, method, class, index).await? {
+        if sec == Section::Frame
+            && self.instr.is_some()
+            && self.trace_gpu(call, method, class, index).await?
+        {
             return Ok(());
         }
 
@@ -301,7 +359,10 @@ impl Engine {
                 let p = js::call(&gpu, "requestAdapter", &args).map_err(jserr)?;
                 let a = await_value(&p).await?;
                 if a.is_null() || a.is_undefined() {
-                    return Err(ReplayError::Unsupported("WebGPU unavailable in webgd tab".into()).to_string());
+                    return Err(
+                        ReplayError::Unsupported("WebGPU unavailable in webgd tab".into())
+                            .to_string(),
+                    );
                 }
                 if let Value::Pending(t) = call.result {
                     self.pending.insert(t, a);
@@ -318,22 +379,38 @@ impl Engine {
                     let usage = if method == "createBuffer" {
                         gpu::augment_buffer_usage(usage)
                     } else {
-                        gpu::augment_texture_usage(usage, js::get(desc, "sampleCount").as_f64().unwrap_or(1.0) as u32)
+                        gpu::augment_texture_usage(
+                            usage,
+                            js::get(desc, "sampleCount").as_f64().unwrap_or(1.0) as u32,
+                        )
                     };
                     js::set(desc, "usage", &js::num(usage as f64));
-                    if method == "createBuffer" && js::truthy(&js::get(desc, "mappedAtCreation")) && sec == Section::Setup
-                        && let Value::ObjRef(id) = call.result {
-                            self.mapped_at_creation.push(id);
-                        }
+                    if method == "createBuffer"
+                        && js::truthy(&js::get(desc, "mappedAtCreation"))
+                        && sec == Section::Setup
+                        && let Value::ObjRef(id) = call.result
+                    {
+                        self.mapped_at_creation.push(id);
+                    }
                 }
                 self.invoke(call, &this, method, args, index).await
             }
             ("GPUDevice", "importExternalTexture") => {
                 let this = self.obj(call.this)?;
                 let mut args = self.args(call)?;
-                if let (Some(desc), Some(Value::Image { width, height, blob })) =
-                    (args.first_mut(), call.args.first().and_then(|d| self.cap.dict_get(d, "source")))
-                {
+                if let (
+                    Some(desc),
+                    Some(Value::Image {
+                        width,
+                        height,
+                        blob,
+                    }),
+                ) = (
+                    args.first_mut(),
+                    call.args
+                        .first()
+                        .and_then(|d| self.cap.dict_get(d, "source")),
+                ) {
                     let data = js::u8_array(self.cap.blob(*blob));
                     let init = js::obj(&[
                         ("format", "RGBA".into()),
@@ -404,8 +481,17 @@ impl Engine {
     }
 
     /// Generic call + result mapping (+ GL trace wrapping in the frame section).
-    async fn invoke(&mut self, call: &Call, this: &JsValue, method: &str, args: Vec<JsValue>, index: usize) -> R {
-        let traced_gl = index != usize::MAX && self.instr.is_some() && self.trace_before_gl(call, index, this, method, &args);
+    async fn invoke(
+        &mut self,
+        call: &Call,
+        this: &JsValue,
+        method: &str,
+        args: Vec<JsValue>,
+        index: usize,
+    ) -> R {
+        let traced_gl = index != usize::MAX
+            && self.instr.is_some()
+            && self.trace_before_gl(call, index, this, method, &args);
         let r = js::call(this, method, &args);
         if traced_gl {
             self.trace_after_gl(call, index);
@@ -420,7 +506,12 @@ impl Engine {
                 if js::is_obj(&r) {
                     self.map(*id, r);
                 } else if !self.st.objs.fwd.contains_key(id) {
-                    return Err(format!("returned {} (capture: {}#{})", js::err_msg(&r), self.cap.class_of(*id), id.0));
+                    return Err(format!(
+                        "returned {} (capture: {}#{})",
+                        js::err_msg(&r),
+                        self.cap.class_of(*id),
+                        id.0
+                    ));
                 }
             }
             _ => {}
@@ -436,13 +527,18 @@ impl Engine {
         }
         let desc = js::clone_obj(&args[0]);
         let feats = js::get(&adapter, "features");
-        let has = |f: &JsValue| js::truthy(&js::call(&feats, "has", std::slice::from_ref(f)).unwrap_or_default());
+        let has = |f: &JsValue| {
+            js::truthy(&js::call(&feats, "has", std::slice::from_ref(f)).unwrap_or_default())
+        };
         let mut out = Vec::new();
         for f in js::array_items(&js::get(&desc, "requiredFeatures")) {
             if has(&f) {
                 out.push(f);
             } else {
-                self.err(format!("missing feature {}", f.as_string().unwrap_or_default()));
+                self.err(format!(
+                    "missing feature {}",
+                    f.as_string().unwrap_or_default()
+                ));
             }
         }
         let ts: JsValue = "timestamp-query".into();
@@ -456,8 +552,17 @@ impl Engine {
             let clamped = js_sys::Object::new();
             for k in js_sys::Object::keys(req.unchecked_ref::<js_sys::Object>()).iter() {
                 let key = k.as_string().unwrap_or_default();
-                let (Some(v), Some(al)) = (js::get(&req, &key).as_f64(), js::get(&limits, &key).as_f64()) else { continue };
-                let v = if key.starts_with("min") { v.max(al) } else { v.min(al) };
+                let (Some(v), Some(al)) = (
+                    js::get(&req, &key).as_f64(),
+                    js::get(&limits, &key).as_f64(),
+                ) else {
+                    continue;
+                };
+                let v = if key.starts_with("min") {
+                    v.max(al)
+                } else {
+                    v.min(al)
+                };
                 js::set(&clamped, &key, &js::num(v));
             }
             js::set(&desc, "requiredLimits", &clamped.into());
@@ -476,7 +581,11 @@ impl Engine {
             };
             sink.borrow_mut().push((idx, msg));
         });
-        let _ = js::call(&dev, "addEventListener", &["uncapturederror".into(), cb.as_ref().clone()]);
+        let _ = js::call(
+            &dev,
+            "addEventListener",
+            &["uncapturederror".into(), cb.as_ref().clone()],
+        );
         self.st.rt.listeners.push((dev.clone(), cb));
         self.st.rt.devices.push(dev.clone());
         if let Value::Pending(t) = call.result {
@@ -490,7 +599,9 @@ impl Engine {
             Some(Value::String(s)) => self.cap.str(*s).to_string(),
             _ => return Err("bad context type".into()),
         };
-        let Value::ObjRef(ctx_id) = call.result else { return Ok(()) };
+        let Value::ObjRef(ctx_id) = call.result else {
+            return Ok(());
+        };
         if self.st.objs.fwd.contains_key(&ctx_id) {
             return Ok(());
         }
@@ -502,7 +613,8 @@ impl Engine {
                     None => js::obj(&[]),
                 };
                 js::set(&attrs, "preserveDrawingBuffer", &JsValue::TRUE);
-                let gl = js::call(&canvas, "getContext", &["webgl2".into(), attrs]).map_err(jserr)?;
+                let gl =
+                    js::call(&canvas, "getContext", &["webgl2".into(), attrs]).map_err(jserr)?;
                 if !js::is_obj(&gl) {
                     return Err("webgl2 context creation failed in webgd tab".into());
                 }
@@ -514,28 +626,48 @@ impl Engine {
                 self.map(ctx_id, js::obj(&[]));
                 self.st.rt.gpu_ctxs.insert(
                     ctx_id,
-                    GpuCanvasCtx { canvas: call.this, cfg: None, device: None, tex: None, frame_tex: false },
+                    GpuCanvasCtx {
+                        canvas: call.this,
+                        cfg: None,
+                        device: None,
+                        tex: None,
+                        frame_tex: false,
+                    },
                 );
                 Ok(())
             }
-            "webgl" | "experimental-webgl" => Err(ReplayError::Unsupported("WebGL1 context".into()).to_string()),
+            "webgl" | "experimental-webgl" => {
+                Err(ReplayError::Unsupported("WebGL1 context".into()).to_string())
+            }
             _ => Ok(()),
         }
     }
 
     fn canvas_js(&mut self, id: ObjId) -> Result<JsValue, String> {
-        let c = self.canvases.entry(id).or_insert(Canvas { js: None, w: 300, h: 150 });
+        let c = self.canvases.entry(id).or_insert(Canvas {
+            js: None,
+            w: 300,
+            h: 150,
+        });
         if let Some(js) = &c.js {
             return Ok(js.clone());
         }
-        let js = js::construct("OffscreenCanvas", &[js::num(c.w as f64), js::num(c.h as f64)]).map_err(jserr)?;
+        let js = js::construct(
+            "OffscreenCanvas",
+            &[js::num(c.w as f64), js::num(c.h as f64)],
+        )
+        .map_err(jserr)?;
         c.js = Some(js.clone());
         self.map(id, js.clone());
         Ok(js)
     }
 
     fn resize_canvas(&mut self, id: ObjId, w: Option<u32>, h: Option<u32>) {
-        let c = self.canvases.entry(id).or_insert(Canvas { js: None, w: 300, h: 150 });
+        let c = self.canvases.entry(id).or_insert(Canvas {
+            js: None,
+            w: 300,
+            h: 150,
+        });
         let (nw, nh) = (w.unwrap_or(c.w), h.unwrap_or(c.h));
         if (nw, nh) == (c.w, c.h) {
             return;
@@ -559,14 +691,24 @@ impl Engine {
             "configure" => {
                 let cfg = self.arg(call.args.first().unwrap_or(&Value::Undefined))?;
                 let device = js::get(&cfg, "device");
-                let ctx = self.st.rt.gpu_ctxs.get_mut(&id).ok_or("unknown canvas context")?;
+                let ctx = self
+                    .st
+                    .rt
+                    .gpu_ctxs
+                    .get_mut(&id)
+                    .ok_or("unknown canvas context")?;
                 ctx.cfg = Some(cfg);
                 ctx.device = Some(device);
                 ctx.tex = None;
                 Ok(())
             }
             "unconfigure" => {
-                let ctx = self.st.rt.gpu_ctxs.get_mut(&id).ok_or("unknown canvas context")?;
+                let ctx = self
+                    .st
+                    .rt
+                    .gpu_ctxs
+                    .get_mut(&id)
+                    .ok_or("unknown canvas context")?;
                 ctx.cfg = None;
                 ctx.tex = None;
                 Ok(())
@@ -574,13 +716,33 @@ impl Engine {
             "getConfiguration" => Ok(()),
             "getCurrentTexture" => {
                 let (canvas, needs_new) = {
-                    let ctx = self.st.rt.gpu_ctxs.get(&id).ok_or("unknown canvas context")?;
-                    (ctx.canvas, ctx.tex.is_none() || (sec == Section::Frame && !ctx.frame_tex))
+                    let ctx = self
+                        .st
+                        .rt
+                        .gpu_ctxs
+                        .get(&id)
+                        .ok_or("unknown canvas context")?;
+                    (
+                        ctx.canvas,
+                        ctx.tex.is_none() || (sec == Section::Frame && !ctx.frame_tex),
+                    )
                 };
-                let (w, h) = self.canvases.get(&canvas).map(|c| (c.w, c.h)).unwrap_or((300, 150));
-                let ctx = self.st.rt.gpu_ctxs.get_mut(&id).ok_or("unknown canvas context")?;
+                let (w, h) = self
+                    .canvases
+                    .get(&canvas)
+                    .map(|c| (c.w, c.h))
+                    .unwrap_or((300, 150));
+                let ctx = self
+                    .st
+                    .rt
+                    .gpu_ctxs
+                    .get_mut(&id)
+                    .ok_or("unknown canvas context")?;
                 if needs_new {
-                    let cfg = ctx.cfg.clone().ok_or("getCurrentTexture before configure")?;
+                    let cfg = ctx
+                        .cfg
+                        .clone()
+                        .ok_or("getCurrentTexture before configure")?;
                     let dev = ctx.device.clone().ok_or("no device")?;
                     let usage = js::get(&cfg, "usage").as_f64().unwrap_or(0x10 as f64) as u32
                         | gpu::tex_usage::RENDER_ATTACHMENT
@@ -690,7 +852,9 @@ impl Engine {
 
     async fn terminate(&mut self) {
         for pass in std::mem::take(&mut self.open_passes) {
-            let Some(p) = self.st.objs.fwd.get(&pass).cloned() else { continue };
+            let Some(p) = self.st.objs.fwd.get(&pass).cloned() else {
+                continue;
+            };
             self.pop_debug_groups(pass, &p);
             if let Err(e) = js::call(&p, "end", &[]) {
                 self.err(format!("terminate pass: {}", jserr(e)));
@@ -698,14 +862,18 @@ impl Engine {
         }
         let mut per_device: Vec<(JsValue, Vec<JsValue>)> = Vec::new();
         for enc in std::mem::take(&mut self.open_encoders) {
-            let Some(e) = self.st.objs.fwd.get(&enc).cloned() else { continue };
+            let Some(e) = self.st.objs.fwd.get(&enc).cloned() else {
+                continue;
+            };
             self.pop_debug_groups(enc, &e);
             if self.instr.is_some() {
                 self.trace_before_finish(enc, &e);
             }
             match js::call(&e, "finish", &[]) {
                 Ok(cb) => {
-                    let Some(dev) = self.device_of(enc) else { continue };
+                    let Some(dev) = self.device_of(enc) else {
+                        continue;
+                    };
                     match per_device.iter_mut().find(|(d, _)| *d == dev) {
                         Some((_, v)) => v.push(cb),
                         None => per_device.push((dev, vec![cb])),

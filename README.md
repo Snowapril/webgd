@@ -5,15 +5,17 @@ webgd is a frame debugger for web pages that render with WebGL2 or WebGPU. It ru
 ## Features
 
 - **Frame capture.** Records every WebGL2/WebGPU call in one rAF frame. Pre-frame state comes from a snapshot taken at the start of that frame.
-- **Command tree.** Calls are grouped by render/compute passes, debug groups and page markers. Draws and dispatches are bold, rows that hit a replay error are red, and a text filter narrows the list.
-- **Inspection.** Selecting a command replays the frame up to that command on webgd's own device, then shows the bound render targets, pipeline state and bindings.
-- **Resource browser.** Lists every buffer, texture, shader, program, pipeline, sampler, bind group and so on, and opens each one in a viewer:
+- **Workspaces.** A top menu bar holds File (Open .webgd…, Save .webgd; Ctrl/Cmd+O), Capture (Refresh targets, Show Capture panel, one Capture entry per live target) and Window (focus any tab), plus a switch between the **Frame Debugger** and **GPU Trace** workspaces, each with its own dock layout. A bottom status bar shows the source URL, the current position, replay status and an error count that opens the Log.
+- **Events and Scrubber.** The **Events** panel lists calls grouped by render/compute passes, debug groups and page markers, with `#`, a kind color strip, the event label and GPU duration after a trace. It offers `Actions only`, Collapse/Expand all, a text filter and a selectable `Pre-frame setup (N calls)` group. The **Scrubber** shows the frame's actions as a horizontal strip (widths follow GPU duration after a trace) with marker bands; click or drag to select, Left/Right to step, Home/End for first/last event.
+- **Inspection.** Selecting a command replays the frame up to that command on webgd's own device. **Render Targets** shows a thumbnail strip and a large preview (Fit / 1:1, texel readout, Open in Resource Viewer). The **API Inspector** walks the pipeline stage by stage (Input Assembly, Vertex Shader, Rasterizer, Fragment Shader, Depth/Stencil, Color Output, or Compute Shader / Dispatch, plus All state) with links to the bound resources.
+- **Resource browser.** **Resources** lists every buffer, texture, shader, program, pipeline, sampler, bind group and so on, with origin, revision count and last write (`Written in frame` narrows the list; double-click selects the last write). The **Resource Viewer** shows:
   - textures: mip/layer selection, channel toggles, a value range with `Auto`, zoom/pan and a texel readout
   - buffers: hex, u8, u16, u32, i32, f32 or f16
   - shaders: source plus estimated per-stage statistics
   - programs and descriptor trees
   - a yellow banner on resources whose contents could not be captured
-- **GPU trace.** A timeline with rows for queues, passes, markers and items, plus counter rows: Occupancy, ALU, Branches and Texture samples (all marked "(est.)"), and Fragments. Ctrl+wheel zooms, drag pans and `F` fits the view. Clicking a bar selects its command.
+  - a **Revisions** side panel listing every create/write/read/destroy of the resource in the pre-frame and frame sections. Clicking a revision selects that command (pre-frame rows show the contents at frame start), and ← / → jump between writes.
+- **GPU trace.** A timeline with collapsible queue groups (passes, markers, items) and a counters group: Occupancy, ALU, Branches and Texture samples (all marked "(est.)"), and Fragments. Ctrl+wheel zooms, drag pans, `F` fits the view, and a crosshair reads out the time. Drag the ruler or shift+drag to select a range (Esc clears; Zoom to range / Clear range); the range summary shows duration, item count, per-counter average/total and the top 10 items. Clicking a bar selects its command.
 - **Save/Open `.webgd`.** A `.webgd` file holds the raw capture bytes. Saved captures open in standalone mode without the extension.
 - **Page-side markers.** Pages can call `window.__webgd.pushMarker(name)`, `popMarker()` and `insertMarker(name)` to annotate WebGL2 frames.
 
@@ -65,8 +67,8 @@ python3 -m http.server 8000 --directory tests/pages
 
 1. Open `http://localhost:8000/webgpu.html` or `http://localhost:8000/webgl2.html` in a visible tab.
 2. Click the webgd toolbar action. The webgd UI opens in a new tab.
-3. In the **Capture** tab, click **Capture** next to the target.
-4. Select a command in **Commands** to see it in **Render Targets**, **Pipeline State** and **Bindings**. Browse resources in **Resources**, or click **Run trace** in **Trace**.
+3. Open the **Capture** menu and pick the target's entry (or use **Capture** in the Capture panel).
+4. Select an event in **Events** or the **Scrubber** to see it in **Render Targets** and the **API Inspector**. Browse resources in **Resources** and their history in the **Resource Viewer**, or switch to the **GPU Trace** workspace and click **Run trace**.
 
 [docs/user-guide.md](docs/user-guide.md) covers each panel.
 

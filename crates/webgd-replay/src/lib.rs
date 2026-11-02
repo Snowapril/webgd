@@ -16,7 +16,9 @@ mod util;
 mod value;
 
 pub use gl::enum_name as gl_enum_name;
-pub use trace::{CounterSample, CounterTrack, QueueTrack, Span, TraceInstr, TraceResult, run_trace};
+pub use trace::{
+    CounterSample, CounterTrack, QueueTrack, Span, TraceInstr, TraceResult, run_trace,
+};
 
 use engine::GpuCanvasCtx;
 use gl::GlCtx;
@@ -71,8 +73,12 @@ pub struct ReplayState {
     pub errors: Vec<(usize, String)>,
     /// Per-resource notes (e.g. "pre-frame contents not captured (depth/stencil)").
     pub notes: HashMap<ObjId, Vec<String>>,
-    /// Frame index replayed up to (inclusive).
+    /// Frame index replayed up to (inclusive). For a frame-start state
+    /// (`frame_start == true`, from `Replayer::replay_to_frame_start`) no frame
+    /// call ran and `stop` is 0 by convention.
     pub stop: usize,
+    /// True when the state reflects contents before `frame[0]` (setup + snapshot only).
+    pub frame_start: bool,
     pub(crate) rt: Runtime,
 }
 
@@ -122,8 +128,14 @@ pub struct TargetView {
 }
 
 pub enum StateNode {
-    Leaf { name: String, value: String },
-    Group { name: String, children: Vec<StateNode> },
+    Leaf {
+        name: String,
+        value: String,
+    },
+    Group {
+        name: String,
+        children: Vec<StateNode>,
+    },
 }
 
 pub struct BindingRow {
@@ -156,10 +168,27 @@ impl Replayer {
     pub fn has_webgpu(&self) -> bool {
         self.adapter.is_some()
     }
-    pub async fn replay_to(&self, cap: &Rc<Capture>, stop: usize, mode: ReplayMode) -> Result<ReplayState, ReplayError> {
+    pub async fn replay_to(
+        &self,
+        cap: &Rc<Capture>,
+        stop: usize,
+        mode: ReplayMode,
+    ) -> Result<ReplayState, ReplayError> {
         let mut eng = engine::Engine::new(cap, mode);
         eng.st.rt.cap = cap.clone();
-        Ok(eng.run(stop).await)
+        Ok(eng.run(Some(stop)).await)
+    }
+
+    /// Replays setup + snapshot and WebGPU termination without any frame call,
+    /// i.e. resource contents at frame start. The returned state has
+    /// `frame_start = true` and `stop = 0`; errors use `usize::MAX` like setup/snapshot.
+    pub async fn replay_to_frame_start(
+        &self,
+        cap: &Rc<Capture>,
+    ) -> Result<ReplayState, ReplayError> {
+        let mut eng = engine::Engine::new(cap, ReplayMode::Inspect);
+        eng.st.rt.cap = cap.clone();
+        Ok(eng.run(None).await)
     }
 }
 
@@ -176,10 +205,23 @@ impl ReplayState {
                 return Some(g);
             }
         }
-        if self.rt.gl.len() == 1 && self.rt.devices.is_empty() { Some(0) } else { None }
+        if self.rt.gl.len() == 1 && self.rt.devices.is_empty() {
+            Some(0)
+        } else {
+            None
+        }
     }
 
     pub async fn inspect(&self, cap: &Capture, index: usize) -> Inspection {
+        if self.frame_start {
+            return Inspection {
+                index,
+                targets: Vec::new(),
+                pipeline: Vec::new(),
+                bindings: Vec::new(),
+                notes: vec!["frame start: no command selected".into()],
+            };
+        }
         match self.gl_for_index(cap, index) {
             Some(g) => gl::inspect::inspect(self, cap, index, &self.rt.gl[g]),
             None => gpu::inspect::inspect(self, cap, index).await,
@@ -190,34 +232,72 @@ impl ReplayState {
         let obj = self.objs.fwd.get(&id).ok_or(ReplayError::Unmapped(id))?;
         match cap.class_of(id) {
             "WebGLBuffer" => {
-                let g = self.rt.gl_index(cap, id).ok_or_else(|| ReplayError::Unsupported("no GL context".into()))?;
-                gl::inspect::read_buffer(&self.rt.gl[g], cap, id, obj).map_err(|m| ReplayError::Js { index: self.stop, message: m })
+                let g = self
+                    .rt
+                    .gl_index(cap, id)
+                    .ok_or_else(|| ReplayError::Unsupported("no GL context".into()))?;
+                gl::inspect::read_buffer(&self.rt.gl[g], cap, id, obj).map_err(|m| {
+                    ReplayError::Js {
+                        index: self.stop,
+                        message: m,
+                    }
+                })
             }
             "GPUBuffer" => {
-                let dev = self.rt.device_of(cap, &self.objs, id).ok_or_else(|| ReplayError::Unsupported("no device".into()))?;
-                gpu::read_buffer(&dev, obj).await.map_err(|m| ReplayError::Js { index: self.stop, message: m })
+                let dev = self
+                    .rt
+                    .device_of(cap, &self.objs, id)
+                    .ok_or_else(|| ReplayError::Unsupported("no device".into()))?;
+                gpu::read_buffer(&dev, obj)
+                    .await
+                    .map_err(|m| ReplayError::Js {
+                        index: self.stop,
+                        message: m,
+                    })
             }
             c => Err(ReplayError::Unsupported(format!("{c} is not a buffer"))),
         }
     }
 
     /// `id` may be a texture, texture view (resolved to its texture) or GL renderbuffer.
-    pub async fn read_texture(&self, cap: &Capture, id: ObjId, mip: u32, layer: u32) -> Result<Image, ReplayError> {
-        let js_err = |m: String| ReplayError::Js { index: self.stop, message: m };
+    pub async fn read_texture(
+        &self,
+        cap: &Capture,
+        id: ObjId,
+        mip: u32,
+        layer: u32,
+    ) -> Result<Image, ReplayError> {
+        let js_err = |m: String| ReplayError::Js {
+            index: self.stop,
+            message: m,
+        };
         match cap.class_of(id) {
             "GPUTextureView" => {
-                let tex = cap.objects.get(&id).and_then(|o| o.parent).ok_or(ReplayError::Unmapped(id))?;
+                let tex = cap
+                    .objects
+                    .get(&id)
+                    .and_then(|o| o.parent)
+                    .ok_or(ReplayError::Unmapped(id))?;
                 Box::pin(self.read_texture(cap, tex, mip, layer)).await
             }
             "GPUTexture" => {
                 let obj = self.objs.fwd.get(&id).ok_or(ReplayError::Unmapped(id))?;
-                let dev = self.rt.device_of(cap, &self.objs, id).ok_or_else(|| ReplayError::Unsupported("no device".into()))?;
-                gpu::read_texture(&dev, obj, mip, layer).await.map_err(js_err)
+                let dev = self
+                    .rt
+                    .device_of(cap, &self.objs, id)
+                    .ok_or_else(|| ReplayError::Unsupported("no device".into()))?;
+                gpu::read_texture(&dev, obj, mip, layer)
+                    .await
+                    .map_err(js_err)
             }
             "WebGLTexture" | "WebGLRenderbuffer" => {
                 let obj = self.objs.fwd.get(&id).ok_or(ReplayError::Unmapped(id))?;
-                let g = self.rt.gl_index(cap, id).ok_or_else(|| ReplayError::Unsupported("no GL context".into()))?;
-                gl::inspect::read_image(&self.rt.gl[g], cap, self.stop, id, obj, mip, layer).map_err(js_err)
+                let g = self
+                    .rt
+                    .gl_index(cap, id)
+                    .ok_or_else(|| ReplayError::Unsupported("no GL context".into()))?;
+                gl::inspect::read_image(&self.rt.gl[g], cap, self.stop, id, obj, mip, layer)
+                    .map_err(js_err)
             }
             c => Err(ReplayError::Unsupported(format!("{c} is not a texture"))),
         }
@@ -227,7 +307,10 @@ impl ReplayState {
     pub fn shader_info_log(&self, id: ObjId) -> Option<String> {
         let obj = self.objs.fwd.get(&id)?;
         let g = self.rt.gl_index(&self.rt.cap, id)?;
-        self.rt.gl[g].call("getShaderInfoLog", std::slice::from_ref(obj)).ok()?.as_string()
+        self.rt.gl[g]
+            .call("getShaderInfoLog", std::slice::from_ref(obj))
+            .ok()?
+            .as_string()
     }
 
     pub fn program_info(&self, id: ObjId) -> Option<ProgramInfo> {
@@ -238,7 +321,11 @@ impl ReplayState {
 
     pub fn dispose(self) {
         for (target, cb) in &self.rt.listeners {
-            let _ = js::call(target, "removeEventListener", &["uncapturederror".into(), cb.as_ref().clone()]);
+            let _ = js::call(
+                target,
+                "removeEventListener",
+                &["uncapturederror".into(), cb.as_ref().clone()],
+            );
         }
         for dev in &self.rt.devices {
             let _ = js::call(dev, "destroy", &[]);

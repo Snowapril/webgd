@@ -3,3 +3,4 @@ pub mod commands;
 pub mod gl;
 pub mod gpu;
 pub mod resources;
+pub mod revisions;

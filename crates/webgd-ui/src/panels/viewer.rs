@@ -1,14 +1,18 @@
-//! Resource Viewer: textures, buffers, shaders, programs and descriptor trees.
+//! Resource Viewer: textures, buffers, shaders, programs and descriptor trees, plus the
+//! resource's revision history (create / write / read / destroy events).
 use crate::replay_queue::{Key, ViewData, ViewReq};
-use crate::state::{AppState, Loaded};
-use crate::widgets::{ImageTex, banner, default_range, fmt_num, obj_link, value_tree};
+use crate::state::{AppState, Loaded, Tab};
+use crate::widgets::{
+    ACCENT, ImageTex, access_color, banner, default_range, fmt_num, obj_link, value_tree,
+};
 use egui::{Color32, Pos2, Rect, RichText, Sense, TextStyle, Vec2, vec2};
 use std::collections::HashMap;
 use webgd_analysis::{Stage, StageStats};
 use webgd_core::pixels::{Image, f16_to_f64};
-use webgd_core::track::gl::{TEXTURE_2D_ARRAY, TEXTURE_3D, TEXTURE_CUBE_MAP};
+use webgd_core::track::gl::{TEXTURE_2D_ARRAY, TEXTURE_3D, TEXTURE_CUBE_MAP, TexDims};
 use webgd_core::track::resources::wgsl_entry_points;
-use webgd_core::{Call, Capture, ObjId, Value};
+use webgd_core::track::revisions::{self, Access, Revision};
+use webgd_core::{Call, Capture, ObjId, Section, Value};
 
 const TEXTURE_CLASSES: &[&str] = &[
     "GPUTexture",
@@ -136,12 +140,267 @@ impl Default for BufUi {
 
 type StatsKey = (ObjId, String, Stage, usize);
 
+/// Position of an event in capture order: setup calls precede frame calls.
+type EventPos = (u8, usize);
+
+fn event_pos(section: Section, index: usize) -> EventPos {
+    match section {
+        Section::Frame => (1, index),
+        _ => (0, index),
+    }
+}
+
+/// Position just after every setup call and before the first frame call.
+const FRAME_START: EventPos = (0, usize::MAX);
+
+/// Where the current selection sits relative to a resource history.
+struct Cursor {
+    /// Explicitly selected event (pre-frame setup call or frame command).
+    selected: Option<EventPos>,
+    /// Selection position used for prev/next navigation.
+    pos: EventPos,
+    /// Point whose contents the replay shows (`FRAME_START` when the replay stops at frame start).
+    contents: EventPos,
+    /// Replay stop (frame index; `None` = frame start).
+    stop: Option<usize>,
+}
+
+impl Cursor {
+    fn new(st: &AppState, stop: Option<usize>) -> Self {
+        let contents = stop.map_or(FRAME_START, |s| (1, s));
+        let selected = st
+            .selected_setup
+            .map(|i| (0, i))
+            .or(st.selected.map(|i| (1, i)));
+        let pos = st.selected_setup.map_or(contents, |i| (0, i));
+        Cursor {
+            selected,
+            pos,
+            contents,
+            stop,
+        }
+    }
+
+    /// Content revision of `hist` at the replay point.
+    fn revision(&self, hist: &[Revision]) -> Option<u32> {
+        match self.stop {
+            Some(s) => revisions::revision_at(hist, s),
+            None => hist
+                .iter()
+                .take_while(|r| r.section != Section::Frame)
+                .last()
+                .map(|r| r.revision),
+        }
+    }
+
+    /// Index into `hist` of the Create/Write event that produced the content revision at the replay point.
+    fn producing(&self, hist: &[Revision]) -> Option<usize> {
+        self.revision(hist)?;
+        hist.iter().rposition(|r| {
+            matches!(r.access, Access::Create | Access::Write)
+                && event_pos(r.section, r.index) <= self.contents
+        })
+    }
+}
+
+fn access_name(a: Access) -> &'static str {
+    match a {
+        Access::Create => "create",
+        Access::Write => "write",
+        Access::Read => "read",
+        Access::Destroy => "destroy",
+    }
+}
+
+/// `Revision r · contents at …` line for the viewer header.
+fn contents_header(hist: &[Revision], cur: &Cursor, parent: bool) -> String {
+    let rev = cur.revision(hist);
+    let at = match cur.stop {
+        Some(s)
+            if rev.is_none()
+                || hist
+                    .iter()
+                    .any(|r| r.section == Section::Frame && r.index <= s) =>
+        {
+            format!("command #{s}")
+        }
+        _ => "frame start".to_owned(),
+    };
+    let of = if parent { " of parent texture" } else { "" };
+    match rev {
+        Some(r) => format!("Revision {r}{of} · contents at {at}"),
+        None if hist.is_empty() => format!("contents at {at}"),
+        None => format!("not created yet at {at}"),
+    }
+}
+
+const REV_COLS: [(&str, f32); 6] = [
+    ("Rev", 44.0),
+    ("Section", 64.0),
+    ("Event", 56.0),
+    ("Access", 54.0),
+    ("Call", 280.0),
+    ("Detail", 220.0),
+];
+
+/// Fixed-width, left-aligned table cell.
+fn cell(ui: &mut egui::Ui, w: f32, h: f32, widget: impl egui::Widget) -> egui::Response {
+    ui.allocate_ui_with_layout(
+        vec2(w, h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_width(w);
+            ui.add(widget)
+        },
+    )
+    .inner
+}
+
+/// Virtualized revision table; returns the clicked revision.
+fn revision_table(
+    ui: &mut egui::Ui,
+    salt: &str,
+    l: &Loaded,
+    hist: &[Revision],
+    cur: &Cursor,
+    scroll_to_current: bool,
+    max_h: f32,
+) -> Option<Revision> {
+    if hist.is_empty() {
+        ui.weak("no recorded events");
+        return None;
+    }
+    let cap = &l.cap;
+    let row_h = ui.text_style_height(&TextStyle::Body) + 2.0;
+    let spacing = ui.spacing().item_spacing;
+    let total_w: f32 =
+        REV_COLS.iter().map(|c| c.1).sum::<f32>() + spacing.x * REV_COLS.len() as f32;
+    let producing = cur.producing(hist);
+    let mut picked = None;
+    egui::ScrollArea::horizontal()
+        .id_salt((salt, "h"))
+        // Take the panel width instead of requesting the full table width (which would widen the panel).
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for (name, w) in REV_COLS {
+                    cell(ui, w, row_h, egui::Label::new(RichText::new(name).strong()));
+                }
+            });
+            let mut area = egui::ScrollArea::vertical()
+                .id_salt((salt, "v"))
+                .max_height(max_h.max(row_h * 3.0))
+                .auto_shrink([false, true]);
+            if scroll_to_current {
+                let target = hist
+                    .iter()
+                    .position(|r| Some(event_pos(r.section, r.index)) == cur.selected)
+                    .or(producing);
+                if let Some(t) = target {
+                    let step = row_h + spacing.y;
+                    area = area.vertical_scroll_offset((t as f32 * step - 2.0 * step).max(0.0));
+                }
+            }
+            area.show_rows(ui, row_h, hist.len(), |ui, range| {
+                for i in range {
+                    let r = &hist[i];
+                    let pos = event_pos(r.section, r.index);
+                    let is_sel = cur.selected == Some(pos);
+                    let is_cur = producing == Some(i);
+                    let bg = Rect::from_min_size(ui.cursor().min, vec2(total_w, row_h + spacing.y));
+                    let resp = ui
+                        .interact(bg, ui.id().with((salt, i)), Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if is_sel {
+                        ui.painter().rect_filled(
+                            bg,
+                            0.0,
+                            ui.visuals().selection.bg_fill.gamma_multiply(0.45),
+                        );
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(
+                            bg,
+                            0.0,
+                            ui.visuals().widgets.hovered.weak_bg_fill,
+                        );
+                    } else if i % 2 == 1 {
+                        ui.painter()
+                            .rect_filled(bg, 0.0, ui.visuals().faint_bg_color);
+                    }
+                    let call = match r.section {
+                        Section::Frame => l.labels.get(r.index).cloned(),
+                        s => cap
+                            .section(s)
+                            .get(r.index)
+                            .map(|c| webgd_core::display::call_label(cap, c)),
+                    }
+                    .unwrap_or_default();
+                    ui.horizontal(|ui| {
+                        ui.set_height(row_h);
+                        let label = |t: RichText| egui::Label::new(t).truncate().selectable(false);
+                        let rev = if is_cur {
+                            RichText::new(format!("• {}", r.revision))
+                                .monospace()
+                                .strong()
+                                .color(ACCENT)
+                        } else {
+                            RichText::new(r.revision.to_string()).monospace()
+                        };
+                        let rev_resp = cell(ui, REV_COLS[0].1, row_h, label(rev));
+                        if is_cur {
+                            rev_resp.on_hover_text("current revision at the selection");
+                        }
+                        let section = match r.section {
+                            Section::Frame => RichText::new("frame"),
+                            _ => RichText::new("pre-frame").weak(),
+                        };
+                        cell(ui, REV_COLS[1].1, row_h, label(section));
+                        cell(
+                            ui,
+                            REV_COLS[2].1,
+                            row_h,
+                            label(RichText::new(format!("#{}", r.index)).monospace()),
+                        );
+                        cell(
+                            ui,
+                            REV_COLS[3].1,
+                            row_h,
+                            label(
+                                RichText::new(access_name(r.access)).color(access_color(r.access)),
+                            ),
+                        );
+                        cell(
+                            ui,
+                            REV_COLS[4].1,
+                            row_h,
+                            label(RichText::new(call).monospace()),
+                        );
+                        cell(
+                            ui,
+                            REV_COLS[5].1,
+                            row_h,
+                            label(RichText::new(&r.detail).weak()),
+                        );
+                    });
+                    if resp.clicked() {
+                        picked = Some(r.clone());
+                    }
+                }
+            });
+        });
+    picked
+}
+
 #[derive(Default)]
 pub struct ViewerUi {
     current: Option<ObjId>,
     tex: TexUi,
     buf: BufUi,
     stats: HashMap<StatsKey, Result<StageStats, String>>,
+    /// Revisions panel collapsed by the user.
+    rev_hidden: bool,
+    /// (resource, selection) the revision tables were last scrolled for.
+    rev_scrolled: Option<(ObjId, Option<EventPos>, EventPos)>,
 }
 
 fn creation(cap: &Capture, id: ObjId) -> Option<&Call> {
@@ -161,8 +420,20 @@ fn base_texture(cap: &Capture, id: ObjId) -> ObjId {
     }
 }
 
-/// (mip count, layer count, layers are cube faces) at `stop`.
-fn tex_extent(cap: &Capture, id: ObjId, stop: usize, mip: u32) -> (u32, u32, bool) {
+/// GL texture dims at frame start: the snapshot `webgd:glTexture` record (absent → not live at frame start).
+fn frame_start_gl_dims(cap: &Capture, tex: ObjId) -> Option<TexDims> {
+    cap.snapshot
+        .iter()
+        .rfind(|c| {
+            cap.method(c) == "webgd:glTexture"
+                && c.args.first().and_then(Value::as_obj) == Some(tex)
+        })
+        .and_then(|c| c.args.get(1))
+        .and_then(|d| webgd_core::track::gl::snapshot_dims(cap, d))
+}
+
+/// (mip count, layer count, layers are cube faces) at `stop` (`None` = frame start).
+fn tex_extent(cap: &Capture, id: ObjId, stop: Option<usize>, mip: u32) -> (u32, u32, bool) {
     let tex = base_texture(cap, id);
     match cap.class_of(tex) {
         "GPUTexture" => {
@@ -192,7 +463,11 @@ fn tex_extent(cap: &Capture, id: ObjId, stop: usize, mip: u32) -> (u32, u32, boo
             (mips.max(1), layers.max(1), false)
         }
         "WebGLTexture" => {
-            let Some(d) = webgd_core::track::gl::texture_dims(cap, stop, tex) else {
+            let dims = match stop {
+                Some(s) => webgd_core::track::gl::texture_dims(cap, s, tex),
+                None => frame_start_gl_dims(cap, tex),
+            };
+            let Some(d) = dims else {
                 return (1, 1, false);
             };
             let mips = d.levels.keys().map(|(l, _)| l + 1).max().unwrap_or(1);
@@ -210,12 +485,15 @@ fn tex_extent(cap: &Capture, id: ObjId, stop: usize, mip: u32) -> (u32, u32, boo
     }
 }
 
-fn calls_upto(cap: &Capture, stop: usize) -> impl Iterator<Item = &Call> {
-    cap.setup.iter().chain(cap.frame.iter().take(stop + 1))
+/// Setup calls plus frame calls up to `stop` inclusive (`None` = setup only, i.e. frame start).
+fn calls_upto(cap: &Capture, stop: Option<usize>) -> impl Iterator<Item = &Call> {
+    cap.setup
+        .iter()
+        .chain(cap.frame.iter().take(stop.map_or(0, |s| s + 1)))
 }
 
 /// Latest `shaderSource` for a GL shader at `stop`.
-fn gl_shader_source(cap: &Capture, id: ObjId, stop: usize) -> Option<&str> {
+fn gl_shader_source(cap: &Capture, id: ObjId, stop: Option<usize>) -> Option<&str> {
     calls_upto(cap, stop)
         .filter(|c| {
             cap.method(c) == "shaderSource" && c.args.first().and_then(Value::as_obj) == Some(id)
@@ -346,84 +624,192 @@ impl ViewerUi {
             self.current = Some(id);
             self.tex = TexUi::default();
             self.buf = BufUi::default();
+            self.rev_scrolled = None;
         }
-        let cap = l.cap.clone();
-        let Some(stop) = l.stop(st.selected) else {
-            ui.weak("Empty frame.");
+        let Some(key) = st.replay_key() else {
+            ui.weak("Nothing to replay.");
             return;
         };
-        let key = Key {
-            generation: l.generation,
-            stop,
-        };
+        let cap = l.cap.clone();
+        let stop = key.stop;
         let class = cap.class_of(id).to_owned();
         let row = l.resources.iter().find(|r| r.id == id);
         let mut open: Option<ObjId> = None;
+        let mut picked: Option<Revision> = None;
 
-        ui.horizontal(|ui| {
-            ui.heading(webgd_core::display::obj_label(&cap, id));
-            if let Some(r) = row {
-                if !r.label.is_empty() {
-                    ui.label(RichText::new(format!("\"{}\"", r.label)).italics());
+        // Texture views share their parent texture's contents, so its history drives the header
+        // and prev/next navigation.
+        let base = base_texture(&cap, id);
+        let empty: &[Revision] = &[];
+        let own_hist = l.revisions.get(&id).map(Vec::as_slice).unwrap_or(empty);
+        let content_hist = l.revisions.get(&base).map(Vec::as_slice).unwrap_or(empty);
+        let cursor = Cursor::new(st, stop);
+
+        let mut expanded = !self.rev_hidden;
+        // ≈35% of the viewer by default (≥ 240 px), never more than 55%, so the contents keep most of the width.
+        let full_w = ui.available_width();
+        let rev_max_w = (full_w * 0.55).max(96.0);
+        let rev_min_w = 240.0_f32.min(rev_max_w);
+        let rev_default_w = (full_w * 0.35).clamp(rev_min_w, rev_max_w);
+        egui::Panel::right(egui::Id::new("webgd-viewer-revisions-side"))
+            .resizable(true)
+            .default_size(rev_default_w)
+            .size_range(rev_min_w..=rev_max_w)
+            .show_collapsible(ui, &mut expanded, |ui| {
+                let tag = (id, cursor.selected, cursor.pos);
+                let scroll = self.rev_scrolled != Some(tag);
+                self.rev_scrolled = Some(tag);
+                let writes = own_hist
+                    .iter()
+                    .filter(|r| r.access == Access::Write)
+                    .count();
+                ui.horizontal(|ui| {
+                    ui.strong("Revisions");
+                    ui.weak(format!("{} events · {writes} writes", own_hist.len()));
+                });
+                if base != id {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Parent texture").strong());
+                        if obj_link(ui, &cap, base) {
+                            open = Some(base);
+                        }
+                    });
+                    let h = (ui.available_height() - 60.0) * 0.6;
+                    if let Some(r) =
+                        revision_table(ui, "rev-parent", l, content_hist, &cursor, scroll, h)
+                    {
+                        picked = Some(r);
+                    }
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!(
+                            "This view ({})",
+                            webgd_core::display::obj_label(&cap, id)
+                        ))
+                        .strong(),
+                    );
                 }
-                ui.weak(&r.summary);
-            }
-        });
-        if let Some(parent) = cap.objects.get(&id).and_then(|o| o.parent)
-            && !cap.class_of(parent).is_empty()
-        {
-            ui.horizontal(|ui| {
-                ui.weak("parent:");
-                if obj_link(ui, &cap, parent) {
-                    open = Some(parent);
+                let h = ui.available_height() - 24.0;
+                if let Some(r) = revision_table(ui, "rev-own", l, own_hist, &cursor, scroll, h) {
+                    picked = Some(r);
                 }
             });
-        }
-        let notes: Vec<String> = st.replay.results(|r| match &r.replay {
-            Some((k, Ok(info))) if k.generation == l.generation => {
-                let mut n = info.notes.get(&id).cloned().unwrap_or_default();
-                let base = base_texture(&cap, id);
-                if base != id {
-                    n.extend(info.notes.get(&base).cloned().unwrap_or_default());
-                }
-                n
-            }
-            _ => Vec::new(),
-        });
-        for n in &notes {
-            banner(ui, n);
-        }
-        ui.separator();
+        self.rev_hidden = !expanded;
 
-        let want = self.wanted_read(l, Some(id));
-        // Latest read of this exact request (may be from a previous stop while the new one replays).
-        let current_ok = st.replay.results(|r| {
-            r.view
-                .as_ref()
-                .is_some_and(|(k, v, _)| *k == key && Some(*v) == want)
-        });
-        if want.is_some() {
+        egui::CentralPanel::no_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("contents at command #{stop}")).strong());
-                if !current_ok {
+                ui.heading(webgd_core::display::obj_label(&cap, id));
+                if let Some(r) = row {
+                    if !r.label.is_empty() {
+                        ui.label(RichText::new(format!("\"{}\"", r.label)).italics());
+                    }
+                    ui.weak(&r.summary);
+                }
+            });
+            if let Some(parent) = cap.objects.get(&id).and_then(|o| o.parent)
+                && !cap.class_of(parent).is_empty()
+            {
+                ui.horizontal(|ui| {
+                    ui.weak("parent:");
+                    if obj_link(ui, &cap, parent) {
+                        open = Some(parent);
+                    }
+                });
+            }
+            let notes: Vec<String> = st.replay.results(|r| match &r.replay {
+                Some((k, Ok(info))) if k.generation == l.generation => {
+                    let mut n = info.notes.get(&id).cloned().unwrap_or_default();
+                    if base != id {
+                        n.extend(info.notes.get(&base).cloned().unwrap_or_default());
+                    }
+                    n
+                }
+                _ => Vec::new(),
+            });
+            for n in &notes {
+                banner(ui, n);
+            }
+            ui.separator();
+
+            let want = self.wanted_read(l, Some(id));
+            // Latest read of this exact request (may be from a previous stop while the new one replays).
+            let current_ok = st.replay.results(|r| {
+                r.view
+                    .as_ref()
+                    .is_some_and(|(k, v, _)| *k == key && Some(*v) == want)
+            });
+            ui.horizontal(|ui| {
+                let writes: Vec<&Revision> = content_hist
+                    .iter()
+                    .filter(|r| r.access == Access::Write)
+                    .collect();
+                let prev = writes
+                    .iter()
+                    .rev()
+                    .find(|r| event_pos(r.section, r.index) < cursor.pos);
+                let next = writes
+                    .iter()
+                    .find(|r| event_pos(r.section, r.index) > cursor.pos);
+                if ui
+                    .add_enabled(
+                        prev.is_some(),
+                        egui::Button::new(RichText::new("←").monospace()),
+                    )
+                    .on_hover_text("Previous write")
+                    .clicked()
+                {
+                    picked = prev.map(|r| (*r).clone());
+                }
+                if ui
+                    .add_enabled(
+                        next.is_some(),
+                        egui::Button::new(RichText::new("→").monospace()),
+                    )
+                    .on_hover_text("Next write")
+                    .clicked()
+                {
+                    picked = next.map(|r| (*r).clone());
+                }
+                ui.label(
+                    RichText::new(contents_header(content_hist, &cursor, base != id)).strong(),
+                );
+                if want.is_some() && !current_ok {
                     ui.spinner();
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut shown = !self.rev_hidden;
+                    if ui
+                        .toggle_value(&mut shown, "Revisions")
+                        .on_hover_text("Show the revision history panel")
+                        .changed()
+                    {
+                        self.rev_hidden = !shown;
+                    }
+                });
             });
-        }
+            if st.selected_setup.is_some() {
+                ui.weak("pre-frame call selected: replay shows the state at frame start");
+            }
 
-        if let Some(o) = descriptor_ui(ui, &cap, id, &class) {
-            open = Some(o);
-        }
-        if TEXTURE_CLASSES.contains(&class.as_str()) {
-            self.texture_ui(ui, st, &cap, id, key, want);
-        } else if BUFFER_CLASSES.contains(&class.as_str()) {
-            self.buffer_ui(ui, st, want);
-        } else if class == "WebGLShader" || class == "GPUShaderModule" {
-            self.shader_ui(ui, st, &cap, id, key, stop);
-        } else if class == "WebGLProgram"
-            && let Some(o) = self.program_ui(ui, st, &cap, id, key, stop)
-        {
-            open = Some(o);
+            if let Some(o) = descriptor_ui(ui, &cap, id, &class) {
+                open = Some(o);
+            }
+            if TEXTURE_CLASSES.contains(&class.as_str()) {
+                self.texture_ui(ui, st, &cap, id, key, want);
+            } else if BUFFER_CLASSES.contains(&class.as_str()) {
+                self.buffer_ui(ui, st, want);
+            } else if class == "WebGLShader" || class == "GPUShaderModule" {
+                self.shader_ui(ui, st, &cap, id, key, stop);
+            } else if class == "WebGLProgram"
+                && let Some(o) = self.program_ui(ui, st, &cap, id, key, stop)
+            {
+                open = Some(o);
+            }
+        });
+        if let Some(rev) = picked {
+            st.select_revision(&rev);
+            // Keep the viewer (same resource, same viewer state) in front.
+            st.focus_tab = Some(Tab::Viewer);
         }
         if let Some(o) = open {
             st.open_resource(o);
@@ -568,7 +954,7 @@ impl ViewerUi {
         cap: &Capture,
         id: ObjId,
         key: Key,
-        stop: usize,
+        stop: Option<usize>,
     ) {
         let (src, rows): (String, Vec<(String, Stage)>) = if cap.class_of(id) == "WebGLShader" {
             let src = gl_shader_source(cap, id, stop).unwrap_or("").to_owned();
@@ -663,7 +1049,7 @@ impl ViewerUi {
         cap: &Capture,
         id: ObjId,
         key: Key,
-        stop: usize,
+        stop: Option<usize>,
     ) -> Option<ObjId> {
         let mut open = None;
         let mut attached: Vec<ObjId> = Vec::new();

@@ -1,5 +1,6 @@
 //! Latest-wins replay scheduling. One `spawn_local` loop owns the live `ReplayState`,
-//! replays to the requested stop index, then runs inspection and resource reads.
+//! replays to the requested stop (a frame command or frame start), then runs inspection and
+//! resource reads.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -7,11 +8,23 @@ use webgd_core::pixels::Image;
 use webgd_core::{Capture, ObjId};
 use webgd_replay::{Inspection, ProgramInfo, ReplayMode, ReplayState, Replayer};
 
-/// Identifies one replay: capture generation + inclusive stop index.
+/// Identifies one replay: capture generation + stop point.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Key {
     pub generation: u64,
-    pub stop: usize,
+    /// Inclusive frame-call index the replay stops at; `None` = frame start (setup + snapshot
+    /// applied, no frame calls).
+    pub stop: Option<usize>,
+}
+
+impl Key {
+    /// `#idx` for command stops, `frame start` otherwise.
+    pub fn label(&self) -> String {
+        match self.stop {
+            Some(i) => format!("#{i}"),
+            None => "frame start".to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -92,7 +105,8 @@ impl ReplayQueue {
         self.replayer.clone()
     }
 
-    /// Requests replay to `key.stop` (plus inspection / view read). No-op if identical to the last request.
+    /// Requests replay to `key.stop` (plus inspection / view read). No-op if identical to the last
+    /// request. `inspect` must be `None` for frame-start keys.
     pub fn ensure(
         &mut self,
         cap: &Rc<Capture>,
@@ -150,10 +164,11 @@ async fn run(shared: Rc<RefCell<Shared>>, cell: ReplayerCell, ctx: egui::Context
                 if let Some((_, old)) = other {
                     old.dispose();
                 }
-                match rep
-                    .replay_to(&req.cap, req.key.stop, ReplayMode::Inspect)
-                    .await
-                {
+                let replayed = match req.key.stop {
+                    Some(stop) => rep.replay_to(&req.cap, stop, ReplayMode::Inspect).await,
+                    None => rep.replay_to_frame_start(&req.cap).await,
+                };
+                match replayed {
                     Ok(st) => {
                         let info = ReplayInfo {
                             errors: st.errors.clone(),

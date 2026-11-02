@@ -336,22 +336,97 @@ Readback works at the replayed point:
   - GL textures and renderbuffers: read through the scratch FBO, sized by `webgd_core::track::gl::texture_dims`.
 - `read_buffer`: `copyBufferToBuffer` for GPU buffers, `getBufferSubData` for GL buffers.
 
+### Frame-start replay
+
+`Replayer::replay_to_frame_start(cap)` runs steps 1–3 of the replay order (setup and snapshot)
+and no frame calls, so the state holds resource contents as they were before `frame[0]`. The
+returned `ReplayState` has `frame_start = true` and `stop = 0` by convention; errors use
+`usize::MAX` like setup and snapshot errors. `inspect` on a frame-start state returns no targets
+or pipeline state. Reads (`read_texture`, `read_buffer`) work as usual and show frame-start
+contents.
+
 ### Replay scheduling: `ReplayQueue`
 
 `webgd-ui/src/replay_queue.rs` keeps one pending request, `Option<Request>`. Each new request
-overwrites the previous one (latest wins). `App::schedule_replay` submits a `Key {generation,
-stop}`, the selected command, and the viewer's read request. Identical consecutive submissions
-are ignored.
+overwrites the previous one (latest wins). `App::schedule_replay` submits the key from
+`AppState::replay_key`, the selected command, and the viewer's read request. Identical
+consecutive submissions are ignored.
+
+The key is `Key { generation, stop: Option<usize> }`. `stop = Some(i)` replays up to `frame[i]`
+inclusive. `stop = None` means frame start: it is used when no frame command is selected but a
+pre-frame setup call is (`AppState::selected_setup`). `Key::label` renders `#i` or `frame start`.
 
 A single `spawn_local` loop processes requests:
 
 1. Take the pending request.
-2. Reuse the held `ReplayState` if its key matches. Otherwise `dispose()` it and `replay_to(..., ReplayMode::Inspect)`.
+2. Reuse the held `ReplayState` if its key matches. Otherwise `dispose()` it and run `replay_to(..., stop, ReplayMode::Inspect)` for `Some(stop)`, or `replay_to_frame_start` for `None`.
 3. Run `inspect(index)`, unless a newer request with a different key is already pending.
 4. Run the view read (`read_texture`, `read_buffer`, shader info log, program info), with the same check.
 5. Keep the state for the next request.
 
 The loop runs while requests are pending. The `Replayer` is created once per UI session.
+
+## Revision history: `webgd-core/src/track/revisions.rs`
+
+`revisions::all(cap) -> HashMap<ObjId, Vec<Revision>>` lists, per resource, every call that
+creates, writes, reads or destroys it. It is pure Rust and computed once when a capture is
+loaded (`Loaded::revisions` in `webgd-ui/src/state.rs`).
+
+**Inputs.** The walk runs over the setup section, then loads frame-start bindings from the
+snapshot section (`webgd:glState`, framebuffer and vertex array records), then runs over the frame
+section. Snapshot records never produce events themselves; they only seed the bindings that the
+first frame calls rely on.
+
+**Classification.** Each event has an `Access`:
+
+- `Create`: a creating call returned the resource (`create*`, `getCurrentTexture`, `getBindGroupLayout`, `finish`).
+- `Write`: contents modified: uploads, copy destinations, clears, render-target and storage writes.
+- `Read`: bound or consumed without modification: sampled textures, vertex/index/uniform buffers, copy sources.
+- `Destroy`: `delete*` / `destroy`.
+
+GL calls are attributed through tracked per-context bindings (texture units, buffer targets,
+VAOs, framebuffers). WebGPU calls are attributed through tracked pass and bundle encoder state and
+bind group contents. A call produces at most one event per (resource, access).
+
+**Views.** `GPUTextureView` events are attributed to the parent `GPUTexture` (from `createView`)
+and are also listed under the view itself.
+
+**Numbering.** Each resource has its own revision counter: 0 at `Create`, +1 per `Write`; `Read`
+and `Destroy` carry the current value. A resource first seen without a `Create` starts at 0. Each
+list is in capture order: all `Section::Setup` events, then `Section::Frame` events (`index` points
+into `cap.setup` or `cap.frame`). `revisions::revision_at(history, index)` returns the revision
+current at `frame[index]`, or `None` if the resource is created later in the frame.
+
+The Resource Viewer's Revisions panel shows this list. Clicking a frame event selects that
+command; clicking a pre-frame event selects the setup call and replays to frame start.
+
+## UI: `webgd-ui`
+
+`app.rs` draws a top menu bar (File, Capture, Window, the workspace switch, capture summary), a
+bottom status bar, and the dock area. There are two workspaces, `Workspace::FrameDebugger` and
+`Workspace::GpuTrace`; each keeps its own `DockState<Tab>` (`frame_dock`, `trace_dock`).
+
+`state.rs` holds `AppState`, shared by every panel. The selection fields are:
+
+- `selected: Option<usize>`: the selected frame command, the replay stop point.
+- `selected_setup: Option<usize>`: a highlighted pre-frame setup call (`cap.setup` index). Setup calls are not stop points; with no frame command selected, the replay stays at frame start.
+- `view: Option<ObjId>`: the resource shown in the Resource Viewer.
+- `trace: Option<Rc<TraceResult>>`: the latest trace for the loaded capture, used by the Events GPU Duration column and the scrubber widths.
+- `workspace`, `status`, `port`, `inbox`, `replay`.
+
+`widgets.rs` holds shared colors and small widgets. Panels live in `panels/` (one module per
+`Tab`):
+
+| Module | Tab |
+|---|---|
+| `capture.rs` | Capture: live targets, open/save |
+| `commands.rs` | Events: command list, pre-frame setup group, filter |
+| `scrubber.rs` | Scrubber: horizontal action strip |
+| `inspect.rs` | Render Targets and API Inspector |
+| `resources.rs` | Resources table |
+| `viewer.rs` | Resource Viewer, including the Revisions panel |
+| `trace.rs` | GPU Trace timeline and range summary |
+| `log.rs` | Log |
 
 ## GPU trace: `webgd-replay/src/trace.rs`
 

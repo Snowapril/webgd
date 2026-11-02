@@ -1,10 +1,130 @@
-//! Shared widgets: descriptor trees, banners, image textures.
-use egui::{Color32, RichText, TextureHandle, TextureOptions};
+//! Shared widgets and look: palette, theme, descriptor trees, banners, image textures.
+use egui::{Color32, CornerRadius, Margin, RichText, Stroke, TextureHandle, TextureOptions, vec2};
 use webgd_core::display::{obj_label, value_label};
 use webgd_core::pixels::Image;
+use webgd_core::track::commands::CmdKind;
+use webgd_core::track::revisions::Access;
 use webgd_core::{Capture, ObjId, Value};
 
+/// Primary highlight: selection, active workspace, focused items.
+pub const ACCENT: Color32 = Color32::from_rgb(46, 140, 160);
 pub const WARN: Color32 = Color32::from_rgb(230, 200, 60);
+pub const ERROR: Color32 = Color32::from_rgb(235, 96, 96);
+/// Fill of the app chrome (menu/tool bar, status bar).
+pub const CHROME_FILL: Color32 = Color32::from_rgb(24, 26, 30);
+
+const PANEL_FILL: Color32 = Color32::from_rgb(32, 35, 40);
+const WINDOW_FILL: Color32 = Color32::from_rgb(38, 41, 47);
+const EXTREME_FILL: Color32 = Color32::from_rgb(18, 20, 23);
+const FAINT_FILL: Color32 = Color32::from_rgb(37, 40, 46);
+const BORDER: Color32 = Color32::from_rgb(54, 58, 66);
+const LINK: Color32 = Color32::from_rgb(112, 196, 214);
+
+/// Dark theme used by the whole app; applied once at startup.
+pub fn apply_theme(ctx: &egui::Context) {
+    ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.style_mut_of(egui::Theme::Dark, |s| {
+        let sp = &mut s.spacing;
+        sp.item_spacing = vec2(6.0, 3.0);
+        sp.button_padding = vec2(6.0, 2.0);
+        sp.interact_size.y = 18.0;
+        sp.indent = 14.0;
+        sp.window_margin = Margin::same(6);
+        sp.menu_margin = Margin::same(4);
+
+        let v = &mut s.visuals;
+        v.dark_mode = true;
+        v.panel_fill = PANEL_FILL;
+        v.window_fill = WINDOW_FILL;
+        v.window_stroke = Stroke::new(1.0, BORDER);
+        v.extreme_bg_color = EXTREME_FILL;
+        v.faint_bg_color = FAINT_FILL;
+        v.code_bg_color = EXTREME_FILL;
+        v.hyperlink_color = LINK;
+        v.warn_fg_color = WARN;
+        v.error_fg_color = ERROR;
+        v.selection.bg_fill = ACCENT;
+        v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+        v.window_corner_radius = CornerRadius::same(4);
+        v.menu_corner_radius = CornerRadius::same(4);
+        v.striped = true;
+
+        let w = &mut v.widgets;
+        w.noninteractive.bg_fill = PANEL_FILL;
+        w.noninteractive.weak_bg_fill = PANEL_FILL;
+        w.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
+        w.inactive.bg_fill = Color32::from_rgb(46, 50, 57);
+        w.inactive.weak_bg_fill = Color32::from_rgb(46, 50, 57);
+        w.hovered.bg_fill = Color32::from_rgb(58, 64, 73);
+        w.hovered.weak_bg_fill = Color32::from_rgb(58, 64, 73);
+        w.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
+        w.active.bg_fill = Color32::from_rgb(68, 76, 86);
+        w.active.weak_bg_fill = Color32::from_rgb(68, 76, 86);
+        w.active.bg_stroke = Stroke::new(1.0, LINK);
+        w.open.bg_fill = Color32::from_rgb(46, 50, 57);
+        w.open.weak_bg_fill = Color32::from_rgb(46, 50, 57);
+        for wv in [
+            &mut w.noninteractive,
+            &mut w.inactive,
+            &mut w.hovered,
+            &mut w.active,
+            &mut w.open,
+        ] {
+            wv.corner_radius = CornerRadius::same(3);
+        }
+    });
+}
+
+/// Color of an event by command kind (event list, scrubber, trace items).
+pub fn kind_color(kind: &CmdKind) -> Color32 {
+    match kind {
+        CmdKind::Draw => Color32::from_rgb(112, 192, 124),
+        CmdKind::Dispatch => Color32::from_rgb(186, 142, 228),
+        CmdKind::Clear => Color32::from_rgb(228, 158, 84),
+        CmdKind::Copy => Color32::from_rgb(104, 168, 228),
+        CmdKind::Submit => Color32::from_rgb(214, 196, 96),
+        CmdKind::GroupBegin(_) | CmdKind::GroupEnd => Color32::from_rgb(150, 162, 178),
+        CmdKind::PassBegin | CmdKind::PassEnd => Color32::from_rgb(110, 196, 206),
+        CmdKind::Call => Color32::from_rgb(182, 186, 192),
+    }
+}
+
+/// Color of a resource revision by access type.
+pub fn access_color(a: Access) -> Color32 {
+    match a {
+        Access::Create => Color32::from_rgb(112, 200, 132),
+        Access::Write => Color32::from_rgb(232, 150, 72),
+        Access::Read => Color32::from_rgb(110, 170, 232),
+        Access::Destroy => Color32::from_rgb(220, 96, 96),
+    }
+}
+
+/// Muted palette for marker/group ranges.
+const MARKER_PALETTE: [Color32; 12] = [
+    Color32::from_rgb(78, 121, 140),
+    Color32::from_rgb(140, 104, 72),
+    Color32::from_rgb(92, 132, 92),
+    Color32::from_rgb(128, 88, 128),
+    Color32::from_rgb(140, 124, 70),
+    Color32::from_rgb(70, 116, 120),
+    Color32::from_rgb(134, 84, 92),
+    Color32::from_rgb(96, 104, 148),
+    Color32::from_rgb(112, 132, 74),
+    Color32::from_rgb(150, 98, 120),
+    Color32::from_rgb(84, 128, 112),
+    Color32::from_rgb(124, 112, 96),
+];
+
+/// Stable color for a marker/group range: FNV-1a hash of `label`, offset by nesting depth.
+pub fn marker_color(depth: usize, label: &str) -> Color32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in label.bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    let i = (h as usize).wrapping_add(depth.wrapping_mul(5)) % MARKER_PALETTE.len();
+    MARKER_PALETTE[i]
+}
 
 pub fn banner(ui: &mut egui::Ui, text: &str) {
     egui::Frame::new()
