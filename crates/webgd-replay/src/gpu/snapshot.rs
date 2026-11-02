@@ -18,7 +18,10 @@ pub fn apply(e: &mut Engine, call: &Call, method: &str) -> Result<(), String> {
     let queue = js::get(&device, "queue");
     let data = call.args.first().unwrap_or(&Value::Null);
     if data.is_nullish() {
-        let note = format!("pre-frame contents not captured ({})", note_text(e, call.args.get(1)));
+        let note = format!(
+            "pre-frame contents not captured ({})",
+            note_text(e, call.args.get(1))
+        );
         e.st.notes.entry(call.this).or_default().push(note);
         return Ok(());
     }
@@ -28,7 +31,12 @@ pub fn apply(e: &mut Engine, call: &Call, method: &str) -> Result<(), String> {
         if js::get(&obj, "mapState").as_string().as_deref() == Some("mapped") {
             // Still mapped from setup mappedAtCreation: write through the mapping, then unmap.
             let ab = js::call(&obj, "getMappedRange", &[]).map_err(jserr)?;
-            js::call(&js::construct("Uint8Array", &[ab]).map_err(jserr)?, "set", &[bytes]).map_err(jserr)?;
+            js::call(
+                &js::construct("Uint8Array", &[ab]).map_err(jserr)?,
+                "set",
+                &[bytes],
+            )
+            .map_err(jserr)?;
             js::call(&obj, "unmap", &[]).map_err(jserr)?;
             return Ok(());
         }
@@ -42,15 +50,29 @@ pub fn apply(e: &mut Engine, call: &Call, method: &str) -> Result<(), String> {
         }
         let n = len & !3;
         if n > 0 {
-            js::call(&queue, "writeBuffer", &[obj, js::num(0.0), bytes, js::num(0.0), js::num(n as f64)]).map_err(jserr)?;
+            js::call(
+                &queue,
+                "writeBuffer",
+                &[obj, js::num(0.0), bytes, js::num(0.0), js::num(n as f64)],
+            )
+            .map_err(jserr)?;
         }
         return Ok(());
     }
     // webgd:gpuTexture
-    let Value::Array(subs) = data else { return Err("bad gpuTexture record".into()) };
+    let Value::Array(subs) = data else {
+        return Err("bad gpuTexture record".into());
+    };
     for sub in subs {
-        let g = |k: &str| e.cap.dict_get(sub, k).and_then(Value::as_f64).unwrap_or(0.0);
-        let Some(bytes) = e.cap.dict_get(sub, "data") else { continue };
+        let g = |k: &str| {
+            e.cap
+                .dict_get(sub, k)
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+        };
+        let Some(bytes) = e.cap.dict_get(sub, "data") else {
+            continue;
+        };
         if bytes.is_nullish() {
             continue;
         }
@@ -63,7 +85,14 @@ pub fn apply(e: &mut Engine, call: &Call, method: &str) -> Result<(), String> {
                 js::obj(&[
                     ("texture", obj.clone()),
                     ("mipLevel", js::num(g("mip"))),
-                    ("origin", js::obj(&[("x", js::num(0.0)), ("y", js::num(0.0)), ("z", js::num(g("layer")))])),
+                    (
+                        "origin",
+                        js::obj(&[
+                            ("x", js::num(0.0)),
+                            ("y", js::num(0.0)),
+                            ("z", js::num(g("layer"))),
+                        ]),
+                    ),
                 ]),
                 bytes,
                 js::obj(&[

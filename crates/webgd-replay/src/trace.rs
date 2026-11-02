@@ -33,8 +33,7 @@ const RESOLVE_STRIDE: u32 = 256;
 const GL_POLL_MS: f64 = 16.0;
 const GL_POLL_TIMEOUT_MS: f64 = 5000.0;
 const NOMINAL_ITEM_NS: u64 = 1000;
-pub const CHROME_TIMESTAMP_NOTE: &str =
-    "Chrome quantizes WebGPU timestamps unless chrome://flags/#enable-webgpu-developer-features is enabled";
+pub const CHROME_TIMESTAMP_NOTE: &str = "Chrome quantizes WebGPU timestamps unless chrome://flags/#enable-webgpu-developer-features is enabled";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TraceInstr {
@@ -125,7 +124,12 @@ impl TraceData {
     }
 
     fn total_ns(&self) -> u64 {
-        let gpu: u64 = self.slots.iter().filter(|s| s.item.is_some() && s.valid()).map(|s| s.end - s.begin).sum();
+        let gpu: u64 = self
+            .slots
+            .iter()
+            .filter(|s| s.item.is_some() && s.valid())
+            .map(|s| s.end - s.begin)
+            .sum();
         gpu + self.gl_dur.values().sum::<u64>()
     }
 }
@@ -187,20 +191,32 @@ impl Instr {
     pub fn new(cap: &Capture, kind: TraceInstr) -> Instr {
         let items = build_tree(cap)
             .into_iter()
-            .filter(|n| is_item(&n.kind) && cap.frame.get(n.index).is_some_and(|c| cap.class_of(c.this) != "GPURenderBundleEncoder"))
+            .filter(|n| {
+                is_item(&n.kind)
+                    && cap
+                        .frame
+                        .get(n.index)
+                        .is_some_and(|c| cap.class_of(c.this) != "GPURenderBundleEncoder")
+            })
             .map(|n| (n.index, n.kind))
             .collect();
         let mut unsplit = HashSet::new();
         for c in &cap.frame {
             match (cap.class_of(c.this), cap.method(c)) {
-                ("GPURenderPassEncoder", "beginOcclusionQuery" | "executeBundles" | "writeTimestamp") => {
+                (
+                    "GPURenderPassEncoder",
+                    "beginOcclusionQuery" | "executeBundles" | "writeTimestamp",
+                ) => {
                     unsplit.insert(c.this);
                 }
                 ("GPUCommandEncoder", "beginRenderPass" | "beginComputePass") => {
                     let d = c.args.first();
                     let special = d.is_some_and(|d| {
-                        cap.dict_get(d, "occlusionQuerySet").is_some_and(|v| !v.is_nullish())
-                            || cap.dict_get(d, "timestampWrites").is_some_and(|v| !v.is_nullish())
+                        cap.dict_get(d, "occlusionQuerySet")
+                            .is_some_and(|v| !v.is_nullish())
+                            || cap
+                                .dict_get(d, "timestampWrites")
+                                .is_some_and(|v| !v.is_nullish())
                     });
                     if special && let Some(id) = c.result.as_obj() {
                         unsplit.insert(id);
@@ -229,13 +245,25 @@ fn create_buffer(dev: &JsValue, size: u32, usage: u32, label: &str) -> Result<Js
     js::call(
         dev,
         "createBuffer",
-        &[js::obj(&[("size", js::num(size as f64)), ("usage", js::num(usage as f64)), ("label", label.into())])],
+        &[js::obj(&[
+            ("size", js::num(size as f64)),
+            ("usage", js::num(usage as f64)),
+            ("label", label.into()),
+        ])],
     )
     .map_err(jserr)
 }
 
 fn create_query_set(dev: &JsValue, ty: &str, count: u32) -> Result<JsValue, String> {
-    js::call(dev, "createQuerySet", &[js::obj(&[("type", ty.into()), ("count", js::num(count as f64))])]).map_err(jserr)
+    js::call(
+        dev,
+        "createQuerySet",
+        &[js::obj(&[
+            ("type", ty.into()),
+            ("count", js::num(count as f64)),
+        ])],
+    )
+    .map_err(jserr)
 }
 
 fn ts_writes(set: &JsValue, q: u32) -> JsValue {
@@ -249,8 +277,14 @@ fn ts_writes(set: &JsValue, q: u32) -> JsValue {
 /// Segment descriptor: later segments load what earlier ones stored.
 fn segment_desc(base: &JsValue, compute: bool, first: bool) -> JsValue {
     let d = js::clone_obj(base);
-    let _ = js_sys::Reflect::delete_property(d.unchecked_ref::<js_sys::Object>(), &"timestampWrites".into());
-    let _ = js_sys::Reflect::delete_property(d.unchecked_ref::<js_sys::Object>(), &"occlusionQuerySet".into());
+    let _ = js_sys::Reflect::delete_property(
+        d.unchecked_ref::<js_sys::Object>(),
+        &"timestampWrites".into(),
+    );
+    let _ = js_sys::Reflect::delete_property(
+        d.unchecked_ref::<js_sys::Object>(),
+        &"occlusionQuerySet".into(),
+    );
     if compute {
         return d;
     }
@@ -272,7 +306,10 @@ fn segment_desc(base: &JsValue, compute: bool, first: bool) -> JsValue {
     let ds = js::get(&d, "depthStencilAttachment");
     if js::is_obj(&ds) {
         let c = js::clone_obj(&ds);
-        for (load, store) in [("depthLoadOp", "depthStoreOp"), ("stencilLoadOp", "stencilStoreOp")] {
+        for (load, store) in [
+            ("depthLoadOp", "depthStoreOp"),
+            ("stencilLoadOp", "stencilStoreOp"),
+        ] {
             if !first && !js::get(&c, load).is_undefined() {
                 js::set(&c, load, &"load".into());
             }
@@ -305,10 +342,18 @@ impl Engine {
         if ins.no_ts.contains(dev) {
             return None;
         }
-        let has = js::truthy(&js::call(&js::get(dev, "features"), "has", &["timestamp-query".into()]).unwrap_or_default());
+        let has = js::truthy(
+            &js::call(
+                &js::get(dev, "features"),
+                "has",
+                &["timestamp-query".into()],
+            )
+            .unwrap_or_default(),
+        );
         if !has {
             ins.no_ts.push(dev.clone());
-            ins.data.note("timestamp-query unsupported: WebGPU items use a nominal layout");
+            ins.data
+                .note("timestamp-query unsupported: WebGPU items use a nominal layout");
             return None;
         }
         ins.devs.push(TimingDev {
@@ -323,29 +368,54 @@ impl Engine {
     }
 
     /// Allocates a timestamp pair → (query set, first query index, slot).
-    fn alloc_slot(&mut self, dev: usize, item: Option<usize>, pass: ObjId) -> Result<(JsValue, u32, u32), String> {
+    fn alloc_slot(
+        &mut self,
+        dev: usize,
+        item: Option<usize>,
+        pass: ObjId,
+    ) -> Result<(JsValue, u32, u32), String> {
         let ins = self.instr();
         let slot = ins.devs[dev].slots.len() as u32;
         if slot.is_multiple_of(SLOTS_PER_SET) {
             let d = ins.devs[dev].device.clone();
             let set = create_query_set(&d, "timestamp", SLOTS_PER_SET * 2)?;
-            let resolve = create_buffer(&d, SLOTS_PER_SET * RESOLVE_STRIDE, buf_usage::QUERY_RESOLVE | buf_usage::COPY_SRC, "webgd:ts-resolve")?;
+            let resolve = create_buffer(
+                &d,
+                SLOTS_PER_SET * RESOLVE_STRIDE,
+                buf_usage::QUERY_RESOLVE | buf_usage::COPY_SRC,
+                "webgd:ts-resolve",
+            )?;
             ins.devs[dev].ts.push((set, resolve));
         }
-        ins.data.slots.push(SlotRec { item, pass, begin: 0, end: 0 });
+        ins.data.slots.push(SlotRec {
+            item,
+            pass,
+            begin: 0,
+            end: 0,
+        });
         let rec = ins.data.slots.len() - 1;
         ins.devs[dev].slots.push(rec);
         let set = ins.devs[dev].ts[(slot / SLOTS_PER_SET) as usize].0.clone();
         Ok((set, (slot % SLOTS_PER_SET) * 2, slot))
     }
 
-    fn alloc_occ(&mut self, dev: usize, item: usize, sample_count: f64) -> Result<(JsValue, u32, u32), String> {
+    fn alloc_occ(
+        &mut self,
+        dev: usize,
+        item: usize,
+        sample_count: f64,
+    ) -> Result<(JsValue, u32, u32), String> {
         let ins = self.instr();
         let k = ins.devs[dev].occ_items.len() as u32;
         if k.is_multiple_of(OCC_PER_SET) {
             let d = ins.devs[dev].device.clone();
             let set = create_query_set(&d, "occlusion", OCC_PER_SET)?;
-            let resolve = create_buffer(&d, OCC_PER_SET * RESOLVE_STRIDE, buf_usage::QUERY_RESOLVE | buf_usage::COPY_SRC, "webgd:occ-resolve")?;
+            let resolve = create_buffer(
+                &d,
+                OCC_PER_SET * RESOLVE_STRIDE,
+                buf_usage::QUERY_RESOLVE | buf_usage::COPY_SRC,
+                "webgd:occ-resolve",
+            )?;
             ins.devs[dev].occ.push((set, resolve));
         }
         ins.devs[dev].occ_items.push((item, sample_count));
@@ -359,16 +429,29 @@ impl Engine {
     }
 
     /// WebGPU timed-run interception. Returns true if the call was fully handled.
-    pub(crate) async fn trace_gpu(&mut self, call: &Call, method: &str, class: &str, index: usize) -> Result<bool, String> {
+    pub(crate) async fn trace_gpu(
+        &mut self,
+        call: &Call,
+        method: &str,
+        class: &str,
+        index: usize,
+    ) -> Result<bool, String> {
         if self.instr().kind != TraceInstr::Timed {
             return Ok(false);
         }
         let cap = self.cap.clone();
-        if class == "GPUCommandEncoder" && matches!(method, "beginRenderPass" | "beginComputePass") {
+        if class == "GPUCommandEncoder" && matches!(method, "beginRenderPass" | "beginComputePass")
+        {
             let enc = self.obj(call.this)?;
-            let Some(dev) = self.device_of(call.this) else { return Ok(false) };
-            let Some(devi) = self.ensure_dev(&dev) else { return Ok(false) };
-            let Some(pass_id) = call.result.as_obj() else { return Ok(false) };
+            let Some(dev) = self.device_of(call.this) else {
+                return Ok(false);
+            };
+            let Some(devi) = self.ensure_dev(&dev) else {
+                return Ok(false);
+            };
+            let Some(pass_id) = call.result.as_obj() else {
+                return Ok(false);
+            };
             let desc = match call.args.first() {
                 Some(a) => js::clone_obj(&self.arg(a)?),
                 None => js::obj(&[]),
@@ -388,7 +471,10 @@ impl Engine {
                     .and_then(|d| cap.dict_get(d, "depthStencilAttachment"))
                     .and_then(|a| cap.dict_get(a, "view"))
                     .and_then(Value::as_obj);
-                self.view_sample_count(color0).or_else(|| self.view_sample_count(depth)).unwrap_or(1.0).max(1.0)
+                self.view_sample_count(color0)
+                    .or_else(|| self.view_sample_count(depth))
+                    .unwrap_or(1.0)
+                    .max(1.0)
             };
             let unsplit = self.instr().unsplit.contains(&pass_id);
             if unsplit {
@@ -397,15 +483,31 @@ impl Engine {
                 let p = js::call(&enc, method, std::slice::from_ref(&desc)).map_err(jserr)?;
                 self.map(pass_id, p);
                 self.open_passes.push(pass_id);
-                self.instr().enc_queries.entry(call.this).or_default().push((devi, Query::Ts(slot)));
+                self.instr()
+                    .enc_queries
+                    .entry(call.this)
+                    .or_default()
+                    .push((devi, Query::Ts(slot)));
             }
             self.instr().passes.insert(
                 pass_id,
-                PassRun { enc, enc_id: call.this, dev: devi, desc, compute, unsplit, sample_count, dyn_state: BTreeMap::new(), segments: 0 },
+                PassRun {
+                    enc,
+                    enc_id: call.this,
+                    dev: devi,
+                    desc,
+                    compute,
+                    unsplit,
+                    sample_count,
+                    dyn_state: BTreeMap::new(),
+                    segments: 0,
+                },
             );
             return Ok(true);
         }
-        let Some(unsplit) = self.instr().passes.get(&call.this).map(|p| p.unsplit) else { return Ok(false) };
+        let Some(unsplit) = self.instr().passes.get(&call.this).map(|p| p.unsplit) else {
+            return Ok(false);
+        };
         if unsplit {
             if self.instr().items.contains_key(&index) {
                 self.instr().data.unsplit_items.push((index, call.this));
@@ -414,10 +516,16 @@ impl Engine {
         }
         let args = self.args(call)?;
         let key = match method {
-            "setBindGroup" | "setVertexBuffer" => Some(format!("{method}:{}", call.args.first().and_then(Value::as_f64).unwrap_or(0.0))),
-            "setPipeline" | "setIndexBuffer" | "setViewport" | "setScissorRect" | "setBlendConstant" | "setStencilReference" => {
-                Some(method.to_string())
-            }
+            "setBindGroup" | "setVertexBuffer" => Some(format!(
+                "{method}:{}",
+                call.args.first().and_then(Value::as_f64).unwrap_or(0.0)
+            )),
+            "setPipeline"
+            | "setIndexBuffer"
+            | "setViewport"
+            | "setScissorRect"
+            | "setBlendConstant"
+            | "setStencilReference" => Some(method.to_string()),
             _ => None,
         };
         if let Some(k) = key {
@@ -429,7 +537,12 @@ impl Engine {
         match method {
             "pushDebugGroup" | "popDebugGroup" | "insertDebugMarker" => Ok(true),
             "end" => {
-                if self.instr().passes.get(&call.this).is_some_and(|p| p.segments == 0) {
+                if self
+                    .instr()
+                    .passes
+                    .get(&call.this)
+                    .is_some_and(|p| p.segments == 0)
+                {
                     self.run_segment(call.this, None)?;
                 }
                 Ok(true)
@@ -467,7 +580,16 @@ impl Engine {
             js::set(&desc, "occlusionQuerySet", &oset);
             occ = Some((oq, k));
         }
-        let p = js::call(&enc, if compute { "beginComputePass" } else { "beginRenderPass" }, &[desc]).map_err(jserr)?;
+        let p = js::call(
+            &enc,
+            if compute {
+                "beginComputePass"
+            } else {
+                "beginRenderPass"
+            },
+            &[desc],
+        )
+        .map_err(jserr)?;
         let mut errs = Vec::new();
         for (m, a) in &dyn_calls {
             if let Err(e) = js::call(&p, m, a) {
@@ -493,10 +615,25 @@ impl Engine {
             };
             if words > 0 {
                 let dev = self.instr().devs[devi].device.clone();
-                let st = create_buffer(&dev, 32, buf_usage::MAP_READ | buf_usage::COPY_DST, "webgd:indirect")?;
+                let st = create_buffer(
+                    &dev,
+                    32,
+                    buf_usage::MAP_READ | buf_usage::COPY_DST,
+                    "webgd:indirect",
+                )?;
                 let off = args.get(1).cloned().unwrap_or(js::num(0.0));
-                js::call(&enc, "copyBufferToBuffer", &[args[0].clone(), off, st.clone(), js::num(0.0), js::num((words * 4) as f64)])
-                    .map_err(jserr)?;
+                js::call(
+                    &enc,
+                    "copyBufferToBuffer",
+                    &[
+                        args[0].clone(),
+                        off,
+                        st.clone(),
+                        js::num(0.0),
+                        js::num((words * 4) as f64),
+                    ],
+                )
+                .map_err(jserr)?;
                 self.instr().devs[devi].indirect.push((*index, st, words));
             }
         } else {
@@ -511,12 +648,18 @@ impl Engine {
         if let Some(p) = ins.passes.get_mut(&pass_id) {
             p.segments += 1;
         }
-        if errs.is_empty() { Ok(()) } else { Err(errs.join("; ")) }
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(errs.join("; "))
+        }
     }
 
     /// Resolves the encoder's queries before `finish()`.
     pub(crate) fn trace_before_finish(&mut self, enc_id: ObjId, enc: &JsValue) {
-        let Some(qs) = self.instr().enc_queries.remove(&enc_id) else { return };
+        let Some(qs) = self.instr().enc_queries.remove(&enc_id) else {
+            return;
+        };
         let ins = self.instr();
         for (devi, q) in qs {
             let d = &ins.devs[devi];
@@ -524,24 +667,50 @@ impl Engine {
                 Query::Ts(s) => {
                     let (set, buf) = &d.ts[(s / SLOTS_PER_SET) as usize];
                     let i = s % SLOTS_PER_SET;
-                    js::call(enc, "resolveQuerySet", &[set.clone(), n(i * 2), n(2), buf.clone(), n(i * RESOLVE_STRIDE)])
+                    js::call(
+                        enc,
+                        "resolveQuerySet",
+                        &[
+                            set.clone(),
+                            n(i * 2),
+                            n(2),
+                            buf.clone(),
+                            n(i * RESOLVE_STRIDE),
+                        ],
+                    )
                 }
                 Query::Occ(k) => {
                     let (set, buf) = &d.occ[(k / OCC_PER_SET) as usize];
                     let i = k % OCC_PER_SET;
-                    js::call(enc, "resolveQuerySet", &[set.clone(), n(i), n(1), buf.clone(), n(i * RESOLVE_STRIDE)])
+                    js::call(
+                        enc,
+                        "resolveQuerySet",
+                        &[set.clone(), n(i), n(1), buf.clone(), n(i * RESOLVE_STRIDE)],
+                    )
                 }
             };
             if let Err(e) = r {
-                ins.data.note(format!("resolveQuerySet failed: {}", jserr(e)));
+                ins.data
+                    .note(format!("resolveQuerySet failed: {}", jserr(e)));
             }
         }
     }
 
     /// GL hooks around an item call. Returns true if a timer query was begun.
-    pub(crate) fn trace_before_gl(&mut self, call: &Call, index: usize, this: &JsValue, method: &str, args: &[JsValue]) -> bool {
-        let Some(kind) = self.instr().items.get(&index).cloned() else { return false };
-        let Some(ci) = self.gl_index(call.this) else { return false };
+    pub(crate) fn trace_before_gl(
+        &mut self,
+        call: &Call,
+        index: usize,
+        this: &JsValue,
+        method: &str,
+        args: &[JsValue],
+    ) -> bool {
+        let Some(kind) = self.instr().items.get(&index).cloned() else {
+            return false;
+        };
+        let Some(ci) = self.gl_index(call.this) else {
+            return false;
+        };
         match self.instr().kind {
             TraceInstr::Timed => {
                 let ctx = &self.st.rt.gl[ci];
@@ -550,7 +719,9 @@ impl Engine {
                     Some(id) => obj_label(&self.cap, id),
                     None => "default".to_string(),
                 };
-                let src = (kind == CmdKind::Draw).then(|| program_sources(ctx)).flatten();
+                let src = (kind == CmdKind::Draw)
+                    .then(|| program_sources(ctx))
+                    .flatten();
                 let has_timer = ctx.timer_ext.is_some();
                 let q = if has_timer {
                     let q = ctx.call("createQuery", &[]).unwrap_or_default();
@@ -570,7 +741,9 @@ impl Engine {
                         true
                     }
                     None => {
-                        ins.data.note("EXT_disjoint_timer_query_webgl2 unavailable: GL items have no timing");
+                        ins.data.note(
+                            "EXT_disjoint_timer_query_webgl2 unavailable: GL items have no timing",
+                        );
                         false
                     }
                 }
@@ -585,35 +758,65 @@ impl Engine {
     }
 
     pub(crate) fn trace_after_gl(&mut self, _call: &Call, index: usize) {
-        let Some((ci, q)) = self.instr().gl_cur.take() else { return };
+        let Some((ci, q)) = self.instr().gl_cur.take() else {
+            return;
+        };
         let _ = self.st.rt.gl[ci].call("endQuery", &[n(TIME_ELAPSED_EXT)]);
         self.instr().gl_queries.push((ci, index, q));
     }
 
     fn counter_program(&mut self, ci: usize, prog: &JsValue) -> Result<JsValue, String> {
-        let map = self.instr().frag.entry(ci).or_default().progs.get_or_insert_with(js_sys::Map::new).clone();
+        let map = self
+            .instr()
+            .frag
+            .entry(ci)
+            .or_default()
+            .progs
+            .get_or_insert_with(js_sys::Map::new)
+            .clone();
         let cached = map.get(prog);
         if js::is_obj(&cached) {
             return Ok(cached);
         }
         let ctx = &self.st.rt.gl[ci];
-        let shaders = js::array_items(&ctx.call("getAttachedShaders", std::slice::from_ref(prog)).unwrap_or_default());
+        let shaders = js::array_items(
+            &ctx.call("getAttachedShaders", std::slice::from_ref(prog))
+                .unwrap_or_default(),
+        );
         let vs = shaders
             .into_iter()
-            .find(|s| js::u(&ctx.call("getShaderParameter", &[s.clone(), n(SHADER_TYPE)]).unwrap_or_default()) == VERTEX_SHADER)
+            .find(|s| {
+                js::u(
+                    &ctx.call("getShaderParameter", &[s.clone(), n(SHADER_TYPE)])
+                        .unwrap_or_default(),
+                ) == VERTEX_SHADER
+            })
             .ok_or("program has no vertex shader")?;
-        let src = ctx.call("getShaderSource", std::slice::from_ref(&vs)).ok().and_then(|v| v.as_string()).unwrap_or_default();
+        let src = ctx
+            .call("getShaderSource", std::slice::from_ref(&vs))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
         let fs = if src.trim_start().starts_with("#version 300 es") {
             "#version 300 es\nprecision mediump float;\nout vec4 webgd_o;\nvoid main(){webgd_o=vec4(1.0);}"
         } else {
             "precision mediump float;\nvoid main(){gl_FragColor=vec4(1.0);}"
         };
-        let count = js::u(&ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_ATTRIBUTES)]).unwrap_or_default());
+        let count = js::u(
+            &ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_ATTRIBUTES)])
+                .unwrap_or_default(),
+        );
         let mut attribs = Vec::new();
         for i in 0..count {
-            let info = ctx.call("getActiveAttrib", &[prog.clone(), n(i)]).unwrap_or_default();
-            let Some(name) = js::get(&info, "name").as_string() else { continue };
-            let loc = ctx.call("getAttribLocation", &[prog.clone(), name.as_str().into()]).unwrap_or_default();
+            let info = ctx
+                .call("getActiveAttrib", &[prog.clone(), n(i)])
+                .unwrap_or_default();
+            let Some(name) = js::get(&info, "name").as_string() else {
+                continue;
+            };
+            let loc = ctx
+                .call("getAttribLocation", &[prog.clone(), name.as_str().into()])
+                .unwrap_or_default();
             if js::f(&loc) >= 0.0 {
                 attribs.push((name, loc));
             }
@@ -629,18 +832,34 @@ impl Engine {
         let fb = ctx.param(DRAW_FRAMEBUFFER_BINDING);
         let clamp = |(w, h): (u32, u32)| (w.clamp(1, 8192), h.clamp(1, 8192));
         if fb.is_null() {
-            return clamp((js::u(&js::get(&ctx.gl, "drawingBufferWidth")), js::u(&js::get(&ctx.gl, "drawingBufferHeight"))));
+            return clamp((
+                js::u(&js::get(&ctx.gl, "drawingBufferWidth")),
+                js::u(&js::get(&ctx.gl, "drawingBufferHeight")),
+            ));
         }
         let ap = |att: u32, pn: u32| {
-            ctx.call("getFramebufferAttachmentParameter", &[n(DRAW_FRAMEBUFFER), n(att), n(pn)]).unwrap_or(JsValue::NULL)
+            ctx.call(
+                "getFramebufferAttachmentParameter",
+                &[n(DRAW_FRAMEBUFFER), n(att), n(pn)],
+            )
+            .unwrap_or(JsValue::NULL)
         };
-        for att in [COLOR_ATTACHMENT0, DEPTH_ATTACHMENT, DEPTH_STENCIL_ATTACHMENT] {
+        for att in [
+            COLOR_ATTACHMENT0,
+            DEPTH_ATTACHMENT,
+            DEPTH_STENCIL_ATTACHMENT,
+        ] {
             let ty = js::u(&ap(att, FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE));
             let obj = ap(att, FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
             if ty == RENDERBUFFER {
                 let prev = ctx.param(RENDERBUFFER_BINDING);
                 let _ = ctx.call("bindRenderbuffer", &[n(RENDERBUFFER), obj]);
-                let p = |pn| js::u(&ctx.call("getRenderbufferParameter", &[n(RENDERBUFFER), n(pn)]).unwrap_or_default());
+                let p = |pn| {
+                    js::u(
+                        &ctx.call("getRenderbufferParameter", &[n(RENDERBUFFER), n(pn)])
+                            .unwrap_or_default(),
+                    )
+                };
                 let r = (p(RENDERBUFFER_WIDTH), p(RENDERBUFFER_HEIGHT));
                 let _ = ctx.call("bindRenderbuffer", &[n(RENDERBUFFER), prev]);
                 return clamp(r);
@@ -651,22 +870,43 @@ impl Engine {
             {
                 let level = js::u(&ap(att, FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL));
                 let face = js::u(&ap(att, FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE));
-                let face = face.checked_sub(TEXTURE_CUBE_MAP_POSITIVE_X).filter(|f| *f < 6).unwrap_or(0);
+                let face = face
+                    .checked_sub(TEXTURE_CUBE_MAP_POSITIVE_X)
+                    .filter(|f| *f < 6)
+                    .unwrap_or(0);
                 if let Some(&(w, h, _)) = d.levels.get(&(level, face)) {
                     return clamp((w, h));
                 }
             }
         }
-        let vp: Vec<u32> = js_sys::Array::from(&ctx.param(VIEWPORT)).iter().map(|v| js::u(&v)).collect();
-        if vp.len() == 4 { clamp((vp[0] + vp[2], vp[1] + vp[3])) } else { (1, 1) }
+        let vp: Vec<u32> = js_sys::Array::from(&ctx.param(VIEWPORT))
+            .iter()
+            .map(|v| js::u(&v))
+            .collect();
+        if vp.len() == 4 {
+            clamp((vp[0] + vp[2], vp[1] + vp[3]))
+        } else {
+            (1, 1)
+        }
     }
 
-    fn count_fragments(&mut self, ci: usize, index: usize, this: &JsValue, method: &str, args: &[JsValue]) {
+    fn count_fragments(
+        &mut self,
+        ci: usize,
+        index: usize,
+        this: &JsValue,
+        method: &str,
+        args: &[JsValue],
+    ) {
         if !self.st.rt.gl[ci].has_cbf {
             self.tnote("float render targets unsupported: no GL fragment counts");
             return;
         }
-        let ctx_disc = js::truthy(&self.st.rt.gl[ci].call("isEnabled", &[n(RASTERIZER_DISCARD)]).unwrap_or_default());
+        let ctx_disc = js::truthy(
+            &self.st.rt.gl[ci]
+                .call("isEnabled", &[n(RASTERIZER_DISCARD)])
+                .unwrap_or_default(),
+        );
         if ctx_disc {
             self.instr().data.frags.insert(index, 0.0);
             return;
@@ -699,11 +939,24 @@ impl Engine {
                 COLOR_CLEAR_VALUE,
                 ACTIVE_TEXTURE,
             ],
-            &[BLEND, DEPTH_TEST, STENCIL_TEST, SCISSOR_TEST, SAMPLE_ALPHA_TO_COVERAGE],
+            &[
+                BLEND,
+                DEPTH_TEST,
+                STENCIL_TEST,
+                SCISSOR_TEST,
+                SAMPLE_ALPHA_TO_COVERAGE,
+            ],
         );
-        let scissor_on = js::truthy(&ctx.call("isEnabled", &[n(SCISSOR_TEST)]).unwrap_or_default());
+        let scissor_on = js::truthy(
+            &ctx.call("isEnabled", &[n(SCISSOR_TEST)])
+                .unwrap_or_default(),
+        );
         // Scratch R16F target sized to the current draw target.
-        let cur = self.instr.as_ref().and_then(|i| i.frag.get(&ci)).and_then(|f| f.target.clone());
+        let cur = self
+            .instr
+            .as_ref()
+            .and_then(|i| i.frag.get(&ci))
+            .and_then(|f| f.target.clone());
         let ctx = &self.st.rt.gl[ci];
         let (fbo, new_target) = match cur {
             Some((_, fbo, tw, th)) if (tw, th) == (w, h) => (fbo, None),
@@ -716,17 +969,32 @@ impl Engine {
                 ctx.c("activeTexture", &[(TEXTURE0 + ctx.scratch_unit) as f64]);
                 let prev = ctx.param(TEXTURE_BINDING_2D);
                 ctx.bind_tex(TEXTURE_2D, &tex);
-                ctx.c("texStorage2D", &[TEXTURE_2D as f64, 1.0, R16F as f64, w as f64, h as f64]);
+                ctx.c(
+                    "texStorage2D",
+                    &[TEXTURE_2D as f64, 1.0, R16F as f64, w as f64, h as f64],
+                );
                 ctx.bind_tex(TEXTURE_2D, &prev);
                 let fbo = ctx.call("createFramebuffer", &[]).unwrap_or_default();
                 ctx.bind_fb(DRAW_FRAMEBUFFER, &fbo);
-                let _ = ctx.call("framebufferTexture2D", &[n(DRAW_FRAMEBUFFER), n(COLOR_ATTACHMENT0), n(TEXTURE_2D), tex.clone(), n(0)]);
+                let _ = ctx.call(
+                    "framebufferTexture2D",
+                    &[
+                        n(DRAW_FRAMEBUFFER),
+                        n(COLOR_ATTACHMENT0),
+                        n(TEXTURE_2D),
+                        tex.clone(),
+                        n(0),
+                    ],
+                );
                 let _ = ctx.call("drawBuffers", &[js::arr(&[n(COLOR_ATTACHMENT0)])]);
                 (fbo.clone(), Some((tex, fbo, w, h)))
             }
         };
         ctx.bind_fb(DRAW_FRAMEBUFFER, &fbo);
-        let _ = ctx.call("colorMask", &[JsValue::TRUE, JsValue::TRUE, JsValue::TRUE, JsValue::TRUE]);
+        let _ = ctx.call(
+            "colorMask",
+            &[JsValue::TRUE, JsValue::TRUE, JsValue::TRUE, JsValue::TRUE],
+        );
         ctx.c("disable", &[SCISSOR_TEST as f64]);
         ctx.c("clearColor", &[0.0, 0.0, 0.0, 0.0]);
         ctx.c("clear", &[COLOR_BUFFER_BIT as f64]);
@@ -735,22 +1003,46 @@ impl Engine {
         }
         let _ = ctx.call("useProgram", std::slice::from_ref(&counter));
         for (name, ty) in plain_uniforms(ctx, &prog) {
-            let lo = ctx.call("getUniformLocation", &[prog.clone(), name.as_str().into()]).unwrap_or(JsValue::NULL);
-            let ln = ctx.call("getUniformLocation", &[counter.clone(), name.as_str().into()]).unwrap_or(JsValue::NULL);
+            let lo = ctx
+                .call("getUniformLocation", &[prog.clone(), name.as_str().into()])
+                .unwrap_or(JsValue::NULL);
+            let ln = ctx
+                .call(
+                    "getUniformLocation",
+                    &[counter.clone(), name.as_str().into()],
+                )
+                .unwrap_or(JsValue::NULL);
             if lo.is_null() || ln.is_null() {
                 continue;
             }
-            let v = ctx.call("getUniform", &[prog.clone(), lo]).unwrap_or_default();
+            let v = ctx
+                .call("getUniform", &[prog.clone(), lo])
+                .unwrap_or_default();
             let _ = set_uniform(&ctx.gl, ty, &ln, &v);
         }
-        let blocks = js::u(&ctx.call("getProgramParameter", &[counter.clone(), n(ACTIVE_UNIFORM_BLOCKS)]).unwrap_or_default());
+        let blocks = js::u(
+            &ctx.call(
+                "getProgramParameter",
+                &[counter.clone(), n(ACTIVE_UNIFORM_BLOCKS)],
+            )
+            .unwrap_or_default(),
+        );
         for i in 0..blocks {
-            let name = ctx.call("getActiveUniformBlockName", &[counter.clone(), n(i)]).unwrap_or_default();
-            let oi = ctx.call("getUniformBlockIndex", &[prog.clone(), name]).unwrap_or_default();
+            let name = ctx
+                .call("getActiveUniformBlockName", &[counter.clone(), n(i)])
+                .unwrap_or_default();
+            let oi = ctx
+                .call("getUniformBlockIndex", &[prog.clone(), name])
+                .unwrap_or_default();
             if js::u(&oi) == u32::MAX {
                 continue;
             }
-            let b = ctx.call("getActiveUniformBlockParameter", &[prog.clone(), oi, n(UNIFORM_BLOCK_BINDING)]).unwrap_or_default();
+            let b = ctx
+                .call(
+                    "getActiveUniformBlockParameter",
+                    &[prog.clone(), oi, n(UNIFORM_BLOCK_BINDING)],
+                )
+                .unwrap_or_default();
             let _ = ctx.call("uniformBlockBinding", &[counter.clone(), n(i), b]);
         }
         ctx.c("enable", &[BLEND as f64]);
@@ -762,9 +1054,16 @@ impl Engine {
         let drew = js::call(this, method, args).is_ok();
         ctx.bind_fb(READ_FRAMEBUFFER, &fbo);
         let sum = if drew {
-            ctx.read_pixels(w, h, gl::formats::ReadClass::Float).ok().map(|img| {
-                img.data.as_chunks::<16>().0.iter().map(|t| f32::from_le_bytes([t[0], t[1], t[2], t[3]]) as f64).sum::<f64>()
-            })
+            ctx.read_pixels(w, h, gl::formats::ReadClass::Float)
+                .ok()
+                .map(|img| {
+                    img.data
+                        .as_chunks::<16>()
+                        .0
+                        .iter()
+                        .map(|t| f32::from_le_bytes([t[0], t[1], t[2], t[3]]) as f64)
+                        .sum::<f64>()
+                })
         } else {
             None
         };
@@ -794,7 +1093,11 @@ impl Engine {
             let mut waited = 0.0;
             loop {
                 let all = queries.iter().all(|(ci, _, q)| {
-                    js::truthy(&self.st.rt.gl[*ci].call("getQueryParameter", &[q.clone(), n(QUERY_RESULT_AVAILABLE)]).unwrap_or_default())
+                    js::truthy(
+                        &self.st.rt.gl[*ci]
+                            .call("getQueryParameter", &[q.clone(), n(QUERY_RESULT_AVAILABLE)])
+                            .unwrap_or_default(),
+                    )
                 });
                 if all || waited >= GL_POLL_TIMEOUT_MS {
                     break;
@@ -802,13 +1105,27 @@ impl Engine {
                 js::sleep(GL_POLL_MS).await;
                 waited += GL_POLL_MS;
             }
-            let disjoint = self.st.rt.gl.iter().any(|c| js::truthy(&c.param(GPU_DISJOINT_EXT)));
+            let disjoint = self
+                .st
+                .rt
+                .gl
+                .iter()
+                .any(|c| js::truthy(&c.param(GPU_DISJOINT_EXT)));
             let mut durs = HashMap::new();
             let mut missing = 0;
             for (ci, idx, q) in &queries {
                 let ctx = &self.st.rt.gl[*ci];
-                if js::truthy(&ctx.call("getQueryParameter", &[q.clone(), n(QUERY_RESULT_AVAILABLE)]).unwrap_or_default()) {
-                    durs.insert(*idx, js::f(&ctx.call("getQueryParameter", &[q.clone(), n(QUERY_RESULT)]).unwrap_or_default()) as u64);
+                if js::truthy(
+                    &ctx.call("getQueryParameter", &[q.clone(), n(QUERY_RESULT_AVAILABLE)])
+                        .unwrap_or_default(),
+                ) {
+                    durs.insert(
+                        *idx,
+                        js::f(
+                            &ctx.call("getQueryParameter", &[q.clone(), n(QUERY_RESULT)])
+                                .unwrap_or_default(),
+                        ) as u64,
+                    );
                 } else {
                     missing += 1;
                 }
@@ -818,7 +1135,9 @@ impl Engine {
             ins.data.gl_dur = durs;
             ins.data.disjoint = disjoint;
             if missing > 0 {
-                ins.data.note(format!("{missing} GL timer queries did not complete within 5 s"));
+                ins.data.note(format!(
+                    "{missing} GL timer queries did not complete within 5 s"
+                ));
             }
         }
         let errors = self.st.errors.len();
@@ -830,17 +1149,34 @@ impl Engine {
         let enc = js::call(dev, "createCommandEncoder", &[]).map_err(jserr)?;
         let mut ts_st = Vec::new();
         let mut occ_st = Vec::new();
-        for (list, out, per) in [(&d.ts, &mut ts_st, SLOTS_PER_SET), (&d.occ, &mut occ_st, OCC_PER_SET)] {
+        for (list, out, per) in [
+            (&d.ts, &mut ts_st, SLOTS_PER_SET),
+            (&d.occ, &mut occ_st, OCC_PER_SET),
+        ] {
             for (_, resolve) in list.iter() {
                 let size = per * RESOLVE_STRIDE;
-                let st = create_buffer(dev, size, buf_usage::MAP_READ | buf_usage::COPY_DST, "webgd:query-readback")?;
-                js::call(&enc, "copyBufferToBuffer", &[resolve.clone(), n(0), st.clone(), n(0), n(size)]).map_err(jserr)?;
+                let st = create_buffer(
+                    dev,
+                    size,
+                    buf_usage::MAP_READ | buf_usage::COPY_DST,
+                    "webgd:query-readback",
+                )?;
+                js::call(
+                    &enc,
+                    "copyBufferToBuffer",
+                    &[resolve.clone(), n(0), st.clone(), n(0), n(size)],
+                )
+                .map_err(jserr)?;
                 out.push(st);
             }
         }
         let cb = js::call(&enc, "finish", &[]).map_err(jserr)?;
         js::call(&js::get(dev, "queue"), "submit", &[js::arr(&[cb])]).map_err(jserr)?;
-        let u64_at = |b: &[u8], off: usize| b.get(off..off + 8).map(|s| u64::from_le_bytes(s.try_into().unwrap_or([0; 8]))).unwrap_or(0);
+        let u64_at = |b: &[u8], off: usize| {
+            b.get(off..off + 8)
+                .map(|s| u64::from_le_bytes(s.try_into().unwrap_or([0; 8])))
+                .unwrap_or(0)
+        };
         let mut ts_bytes = Vec::new();
         for st in &ts_st {
             ts_bytes.push(gpu::map_read(st, SLOTS_PER_SET * RESOLVE_STRIDE).await?);
@@ -854,22 +1190,31 @@ impl Engine {
         let mut indirect = Vec::new();
         for (idx, st, words) in &d.indirect {
             let b = gpu::map_read(st, 32).await?;
-            let w: Vec<u32> =
-                b.as_chunks::<4>().0.iter().take(*words as usize).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+            let w: Vec<u32> = b
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .take(*words as usize)
+                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
             indirect.push((*idx, w));
             let _ = js::call(st, "destroy", &[]);
         }
         let ins = self.instr();
         for (s, rec) in d.slots.iter().enumerate() {
             let s = s as u32;
-            let Some(b) = ts_bytes.get((s / SLOTS_PER_SET) as usize) else { continue };
+            let Some(b) = ts_bytes.get((s / SLOTS_PER_SET) as usize) else {
+                continue;
+            };
             let off = ((s % SLOTS_PER_SET) * RESOLVE_STRIDE) as usize;
             ins.data.slots[*rec].begin = u64_at(b, off);
             ins.data.slots[*rec].end = u64_at(b, off + 8);
         }
         for (k, (item, sc)) in d.occ_items.iter().enumerate() {
             let k = k as u32;
-            let Some(b) = occ_bytes.get((k / OCC_PER_SET) as usize) else { continue };
+            let Some(b) = occ_bytes.get((k / OCC_PER_SET) as usize) else {
+                continue;
+            };
             let v = u64_at(b, ((k % OCC_PER_SET) * RESOLVE_STRIDE) as usize);
             ins.data.occ.insert(*item, v as f64 / sc.max(1.0));
         }
@@ -891,8 +1236,15 @@ fn program_sources(ctx: &gl::GlCtx) -> Option<(String, String)> {
     let mut vs = String::new();
     let mut fs = String::new();
     for s in js::array_items(&ctx.call("getAttachedShaders", &[prog]).unwrap_or_default()) {
-        let src = ctx.call("getShaderSource", std::slice::from_ref(&s)).ok().and_then(|v| v.as_string()).unwrap_or_default();
-        match js::u(&ctx.call("getShaderParameter", &[s, n(SHADER_TYPE)]).unwrap_or_default()) {
+        let src = ctx
+            .call("getShaderSource", std::slice::from_ref(&s))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        match js::u(
+            &ctx.call("getShaderParameter", &[s, n(SHADER_TYPE)])
+                .unwrap_or_default(),
+        ) {
             VERTEX_SHADER => vs = src,
             _ => fs = src,
         }
@@ -904,7 +1256,12 @@ fn program_sources(ctx: &gl::GlCtx) -> Option<(String, String)> {
 // Runner
 // ---------------------------------------------------------------------------------------------
 
-async fn timed_run(rep: &Replayer, cap: &Rc<Capture>, last: usize, mode: TraceInstr) -> Result<TraceData, ReplayError> {
+async fn timed_run(
+    rep: &Replayer,
+    cap: &Rc<Capture>,
+    last: usize,
+    mode: TraceInstr,
+) -> Result<TraceData, ReplayError> {
     let mut st = rep.replay_to(cap, last, ReplayMode::Trace(mode)).await?;
     let data = st.rt.trace.take().unwrap_or_default();
     st.dispose();
@@ -930,7 +1287,9 @@ fn queue_of_call(cap: &Capture, call: &Call) -> Option<QueueKey> {
 
 pub async fn run_trace(rep: &Replayer, cap: &Rc<Capture>) -> Result<TraceResult, ReplayError> {
     if cap.frame.is_empty() {
-        return Err(ReplayError::Unsupported("capture has an empty frame".into()));
+        return Err(ReplayError::Unsupported(
+            "capture has an empty frame".into(),
+        ));
     }
     let last = cap.frame.len() - 1;
     let mut runs = Vec::new();
@@ -948,19 +1307,32 @@ pub async fn run_trace(rep: &Replayer, cap: &Rc<Capture>) -> Result<TraceResult,
         runs.push(data);
     }
     let tree = build_tree(cap);
-    let has_gl_draw = tree.iter().any(|nd| nd.kind == CmdKind::Draw && cap.class_of(cap.frame[nd.index].this).starts_with("WebGL"));
-    let frag_run = if has_gl_draw { Some(timed_run(rep, cap, last, TraceInstr::GlFragmentCount).await?) } else { None };
+    let has_gl_draw = tree.iter().any(|nd| {
+        nd.kind == CmdKind::Draw && cap.class_of(cap.frame[nd.index].this).starts_with("WebGL")
+    });
+    let frag_run = if has_gl_draw {
+        Some(timed_run(rep, cap, last, TraceInstr::GlFragmentCount).await?)
+    } else {
+        None
+    };
 
     let mut order: Vec<usize> = (0..runs.len()).collect();
     order.sort_by_key(|&i| runs[i].total_ns());
     let data = runs.swap_remove(order[order.len() / 2]);
-    for n in data.notes.iter().chain(frag_run.iter().flat_map(|f| f.notes.iter())) {
+    for n in data
+        .notes
+        .iter()
+        .chain(frag_run.iter().flat_map(|f| f.notes.iter()))
+    {
         if !notes.contains(n) {
             notes.push(n.clone());
         }
     }
     if data.errors > 0 {
-        notes.push(format!("{} replay errors during the trace run (see the Log panel for details)", data.errors));
+        notes.push(format!(
+            "{} replay errors during the trace run (see the Log panel for details)",
+            data.errors
+        ));
     }
     Ok(assemble(cap, &tree, &data, frag_run.as_ref(), notes))
 }
@@ -982,7 +1354,8 @@ fn assemble(
 ) -> TraceResult {
     // Queues in order of first appearance.
     let mut keys: Vec<QueueKey> = Vec::new();
-    let queue_idx = |k: QueueKey, keys: &mut Vec<QueueKey>| match keys.iter().position(|x| *x == k) {
+    let queue_idx = |k: QueueKey, keys: &mut Vec<QueueKey>| match keys.iter().position(|x| *x == k)
+    {
         Some(i) => i,
         None => {
             keys.push(k);
@@ -991,20 +1364,32 @@ fn assemble(
     };
     let items: Vec<(usize, CmdKind)> = tree
         .iter()
-        .filter(|nd| is_item(&nd.kind) && cap.class_of(cap.frame[nd.index].this) != "GPURenderBundleEncoder")
+        .filter(|nd| {
+            is_item(&nd.kind) && cap.class_of(cap.frame[nd.index].this) != "GPURenderBundleEncoder"
+        })
         .map(|nd| (nd.index, nd.kind.clone()))
         .collect();
 
     // GPU timing.
-    let t0 = data.slots.iter().filter(|s| s.valid()).map(|s| s.begin).min().unwrap_or(0);
+    let t0 = data
+        .slots
+        .iter()
+        .filter(|s| s.valid())
+        .map(|s| s.begin)
+        .min()
+        .unwrap_or(0);
     let mut pass_span: HashMap<ObjId, (u64, u64)> = HashMap::new();
     for s in data.slots.iter().filter(|s| s.valid()) {
         let e = pass_span.entry(s.pass).or_insert((u64::MAX, 0));
         e.0 = e.0.min(s.begin - t0);
         e.1 = e.1.max(s.end - t0);
     }
-    let item_ts: HashMap<usize, (u64, u64)> =
-        data.slots.iter().filter(|s| s.valid()).filter_map(|s| s.item.map(|i| (i, (s.begin - t0, s.end - t0)))).collect();
+    let item_ts: HashMap<usize, (u64, u64)> = data
+        .slots
+        .iter()
+        .filter(|s| s.valid())
+        .filter_map(|s| s.item.map(|i| (i, (s.begin - t0, s.end - t0))))
+        .collect();
     let unsplit: HashMap<usize, ObjId> = data.unsplit_items.iter().copied().collect();
 
     let mut spans: Vec<ItemSpan> = Vec::new();
@@ -1013,7 +1398,9 @@ fn assemble(
     let mut nominal_used = false;
     for (idx, _) in &items {
         let call = &cap.frame[*idx];
-        let Some(qk) = queue_of_call(cap, call) else { continue };
+        let Some(qk) = queue_of_call(cap, call) else {
+            continue;
+        };
         let q = queue_idx(qk.clone(), &mut keys);
         let (start, end, uns) = match qk {
             QueueKey::Gl(_) => {
@@ -1037,7 +1424,13 @@ fn assemble(
                 }
             }
         };
-        spans.push(ItemSpan { index: *idx, queue: q, start, end, unsplit: uns });
+        spans.push(ItemSpan {
+            index: *idx,
+            queue: q,
+            start,
+            end,
+            unsplit: uns,
+        });
     }
     if nominal_used {
         notes.push("WebGPU items without timestamps are laid out with a nominal 1 µs each".into());
@@ -1047,8 +1440,10 @@ fn assemble(
     }
     // Queues referenced by markers / passes even without items.
     for c in &cap.frame {
-        if matches!(cap.method(c), "pushDebugGroup" | "webgd:pushMarker" | "beginRenderPass" | "beginComputePass")
-            && let Some(k) = queue_of_call(cap, c)
+        if matches!(
+            cap.method(c),
+            "pushDebugGroup" | "webgd:pushMarker" | "beginRenderPass" | "beginComputePass"
+        ) && let Some(k) = queue_of_call(cap, c)
         {
             queue_idx(k, &mut keys);
         }
@@ -1074,8 +1469,18 @@ fn assemble(
     }
     for s in &spans {
         let label = call_label(cap, &cap.frame[s.index]);
-        let label = if s.unsplit { format!("{label} (unsplit pass)") } else { label };
-        queues[s.queue].items.push(Span { start_ns: s.start, end_ns: s.end, label, depth: 0, index: s.index });
+        let label = if s.unsplit {
+            format!("{label} (unsplit pass)")
+        } else {
+            label
+        };
+        queues[s.queue].items.push(Span {
+            start_ns: s.start,
+            end_ns: s.end,
+            label,
+            depth: 0,
+            index: s.index,
+        });
     }
 
     // Passes.
@@ -1084,16 +1489,36 @@ fn assemble(
         if !matches!(m, "beginRenderPass" | "beginComputePass") {
             continue;
         }
-        let (Some(pass), Some(qk)) = (c.result.as_obj(), queue_of_call(cap, c)) else { continue };
-        let Some(&(s, e)) = pass_span.get(&pass) else { continue };
+        let (Some(pass), Some(qk)) = (c.result.as_obj(), queue_of_call(cap, c)) else {
+            continue;
+        };
+        let Some(&(s, e)) = pass_span.get(&pass) else {
+            continue;
+        };
         let q = keys.iter().position(|k| *k == qk).unwrap_or(0);
         let label = c
             .args
             .first()
             .and_then(|d| get_str(cap, d, "label"))
             .map(str::to_string)
-            .unwrap_or_else(|| format!("{} {}", if m == "beginRenderPass" { "Render pass" } else { "Compute pass" }, obj_label(cap, pass)));
-        queues[q].passes.push(Span { start_ns: s, end_ns: e, label, depth: 0, index: i });
+            .unwrap_or_else(|| {
+                format!(
+                    "{} {}",
+                    if m == "beginRenderPass" {
+                        "Render pass"
+                    } else {
+                        "Compute pass"
+                    },
+                    obj_label(cap, pass)
+                )
+            });
+        queues[q].passes.push(Span {
+            start_ns: s,
+            end_ns: e,
+            label,
+            depth: 0,
+            index: i,
+        });
     }
     for (q, k) in keys.iter().enumerate() {
         if !matches!(k, QueueKey::Gl(_)) {
@@ -1102,19 +1527,35 @@ fn assemble(
         let mut run: Option<(String, u64, u64, usize)> = None;
         let mut out = Vec::new();
         for s in spans.iter().filter(|s| s.queue == q) {
-            let fb = data.gl_fb.get(&s.index).cloned().unwrap_or_else(|| "default".into());
+            let fb = data
+                .gl_fb
+                .get(&s.index)
+                .cloned()
+                .unwrap_or_else(|| "default".into());
             match &mut run {
                 Some((l, _, e, _)) if *l == fb => *e = s.end,
                 _ => {
                     if let Some((l, st, e, idx)) = run.take() {
-                        out.push(Span { start_ns: st, end_ns: e, label: l, depth: 0, index: idx });
+                        out.push(Span {
+                            start_ns: st,
+                            end_ns: e,
+                            label: l,
+                            depth: 0,
+                            index: idx,
+                        });
                     }
                     run = Some((fb, s.start, s.end, s.index));
                 }
             }
         }
         if let Some((l, st, e, idx)) = run {
-            out.push(Span { start_ns: st, end_ns: e, label: l, depth: 0, index: idx });
+            out.push(Span {
+                start_ns: st,
+                end_ns: e,
+                label: l,
+                depth: 0,
+                index: idx,
+            });
         }
         queues[q].passes = out;
     }
@@ -1122,10 +1563,18 @@ fn assemble(
     // Markers.
     let total_end = spans.iter().map(|s| s.end).max().unwrap_or(0);
     let next_start = |q: usize, after: usize| {
-        spans.iter().filter(|s| s.queue == q && s.index > after).map(|s| s.start).next().unwrap_or(total_end)
+        spans
+            .iter()
+            .filter(|s| s.queue == q && s.index > after)
+            .map(|s| s.start)
+            .next()
+            .unwrap_or(total_end)
     };
     let range_span = |q: usize, from: usize, to: usize| {
-        let mut it = spans.iter().filter(|s| s.queue == q && s.index > from && s.index < to).peekable();
+        let mut it = spans
+            .iter()
+            .filter(|s| s.queue == q && s.index > from && s.index < to)
+            .peekable();
         it.peek()?;
         let (mut a, mut b) = (u64::MAX, 0);
         for s in it {
@@ -1135,22 +1584,48 @@ fn assemble(
         Some((a, b))
     };
     let mut stacks: HashMap<ObjId, Vec<(String, usize)>> = HashMap::new();
-    let close = |queues: &mut Vec<QueueTrack>, q: usize, label: String, depth: usize, push: usize, pop: usize| {
+    let close = |queues: &mut Vec<QueueTrack>,
+                 q: usize,
+                 label: String,
+                 depth: usize,
+                 push: usize,
+                 pop: usize| {
         let (s, e) = range_span(q, push, pop).unwrap_or_else(|| {
             let t = next_start(q, pop);
             (t, t)
         });
-        queues[q].markers.push(Span { start_ns: s, end_ns: e, label, depth: depth.min(255) as u8, index: push });
+        queues[q].markers.push(Span {
+            start_ns: s,
+            end_ns: e,
+            label,
+            depth: depth.min(255) as u8,
+            index: push,
+        });
     };
     let mut roots: HashMap<ObjId, usize> = HashMap::new();
     for (i, c) in cap.frame.iter().enumerate() {
         let m = cap.method(c);
-        if !matches!(m, "pushDebugGroup" | "popDebugGroup" | "insertDebugMarker" | "webgd:pushMarker" | "webgd:popMarker" | "webgd:insertMarker") {
+        if !matches!(
+            m,
+            "pushDebugGroup"
+                | "popDebugGroup"
+                | "insertDebugMarker"
+                | "webgd:pushMarker"
+                | "webgd:popMarker"
+                | "webgd:insertMarker"
+        ) {
             continue;
         }
-        let Some(qk) = queue_of_call(cap, c) else { continue };
-        let Some(q) = keys.iter().position(|k| *k == qk) else { continue };
-        let root = ancestor(cap, c.this, |cl| cl == "GPUCommandEncoder" || cl == "WebGL2RenderingContext").unwrap_or(c.this);
+        let Some(qk) = queue_of_call(cap, c) else {
+            continue;
+        };
+        let Some(q) = keys.iter().position(|k| *k == qk) else {
+            continue;
+        };
+        let root = ancestor(cap, c.this, |cl| {
+            cl == "GPUCommandEncoder" || cl == "WebGL2RenderingContext"
+        })
+        .unwrap_or(c.this);
         roots.insert(root, q);
         let label = match c.args.first() {
             Some(Value::String(s)) => cap.str(*s).to_string(),
@@ -1168,7 +1643,13 @@ fn assemble(
             _ => {
                 let depth = stack.len();
                 let t = next_start(q, i);
-                queues[q].markers.push(Span { start_ns: t, end_ns: t, label, depth: depth.min(255) as u8, index: i });
+                queues[q].markers.push(Span {
+                    start_ns: t,
+                    end_ns: t,
+                    label,
+                    depth: depth.min(255) as u8,
+                    index: i,
+                });
             }
         }
     }
@@ -1183,11 +1664,21 @@ fn assemble(
     let counters = counters(cap, &spans, &items, &keys, data, frag_run, &mut notes);
     let total_ns = queues
         .iter()
-        .flat_map(|q| q.items.iter().chain(q.passes.iter()).chain(q.markers.iter()))
+        .flat_map(|q| {
+            q.items
+                .iter()
+                .chain(q.passes.iter())
+                .chain(q.markers.iter())
+        })
         .map(|s| s.end_ns)
         .max()
         .unwrap_or(0);
-    TraceResult { queues, counters, notes, total_ns }
+    TraceResult {
+        queues,
+        counters,
+        notes,
+        total_ns,
+    }
 }
 
 #[derive(Default)]
@@ -1260,7 +1751,11 @@ fn counters(
     }
     let mut cache: HashMap<(String, Stage), Option<StageStats>> = HashMap::new();
     let mut failures: Vec<String> = Vec::new();
-    let mut wgsl = |module: ObjId, entry: Option<&str>, stage: Stage, failures: &mut Vec<String>| -> Option<StageStats> {
+    let mut wgsl = |module: ObjId,
+                    entry: Option<&str>,
+                    stage: Stage,
+                    failures: &mut Vec<String>|
+     -> Option<StageStats> {
         let key = (format!("{}:{}", module.0, entry.unwrap_or("")), stage);
         cache
             .entry(key)
@@ -1306,7 +1801,11 @@ fn counters(
     let mut frag_gl = Vec::new();
     for s in spans {
         let call = &cap.frame[s.index];
-        let kind = kinds.get(&s.index).copied().cloned().unwrap_or(CmdKind::Call);
+        let kind = kinds
+            .get(&s.index)
+            .copied()
+            .cloned()
+            .unwrap_or(CmdKind::Call);
         let method = cap.method(call);
         let a = num_list_args(cap, call);
         let arg = |i: usize, d: f64| a.get(i).copied().flatten().unwrap_or(d);
@@ -1317,7 +1816,10 @@ fn counters(
                 sh.vs = glsl(vs, Stage::Vertex, &mut failures);
                 sh.fs = glsl(fs, Stage::Fragment, &mut failures);
             }
-        } else if let Some(desc) = pipeline_at.get(&s.index).and_then(|p| creation_desc(cap, *p)) {
+        } else if let Some(desc) = pipeline_at
+            .get(&s.index)
+            .and_then(|p| creation_desc(cap, *p))
+        {
             if let Some((m, e)) = stage_of(desc, "vertex") {
                 sh.vs = wgsl(m, e.as_deref(), Stage::Vertex, &mut failures);
             }
@@ -1345,7 +1847,9 @@ fn counters(
                 } else {
                     match method {
                         "draw" | "drawIndexed" => arg(0, 0.0) * arg(1, 1.0),
-                        "drawIndirect" | "drawIndexedIndirect" => ind(0).unwrap_or(0.0) * ind(1).unwrap_or(1.0),
+                        "drawIndirect" | "drawIndexedIndirect" => {
+                            ind(0).unwrap_or(0.0) * ind(1).unwrap_or(1.0)
+                        }
                         "executeBundles" => bundle_list(call).iter().map(|b| b.1).sum(),
                         _ => 0.0,
                     }
@@ -1358,8 +1862,19 @@ fn counters(
                 let fr = frags.unwrap_or(0.0);
                 let v = sh.vs.clone().unwrap_or_default();
                 let f = sh.fs.clone().unwrap_or_default();
-                let occ = sh.fs.as_ref().or(sh.vs.as_ref()).map(occupancy).unwrap_or(0.0);
-                (occ, v.alu * vinv + f.alu * fr, v.branches * vinv + f.branches * fr, v.tex_samples * vinv + f.tex_samples * fr, frags)
+                let occ = sh
+                    .fs
+                    .as_ref()
+                    .or(sh.vs.as_ref())
+                    .map(occupancy)
+                    .unwrap_or(0.0);
+                (
+                    occ,
+                    v.alu * vinv + f.alu * fr,
+                    v.branches * vinv + f.branches * fr,
+                    v.tex_samples * vinv + f.tex_samples * fr,
+                    frags,
+                )
             }
             CmdKind::Dispatch => {
                 let groups = if method == "dispatchWorkgroupsIndirect" {
@@ -1368,20 +1883,38 @@ fn counters(
                     arg(0, 0.0) * arg(1, 1.0) * arg(2, 1.0)
                 };
                 let c = sh.cs.clone().unwrap_or_default();
-                let wg = c.workgroup_size.map(|w| w.iter().map(|x| *x as f64).product::<f64>()).unwrap_or(1.0);
+                let wg = c
+                    .workgroup_size
+                    .map(|w| w.iter().map(|x| *x as f64).product::<f64>())
+                    .unwrap_or(1.0);
                 let threads = groups * wg;
                 let occ = sh.cs.as_ref().map(occupancy).unwrap_or(0.0);
-                (occ, c.alu * threads, c.branches * threads, c.tex_samples * threads, None)
+                (
+                    occ,
+                    c.alu * threads,
+                    c.branches * threads,
+                    c.tex_samples * threads,
+                    None,
+                )
             }
             _ => (0.0, 0.0, 0.0, 0.0, None),
         };
-        let sample = |value: f64, total: f64| CounterSample { start_ns: s.start, end_ns: s.end, value, total };
+        let sample = |value: f64, total: f64| CounterSample {
+            start_ns: s.start,
+            end_ns: s.end,
+            value,
+            total,
+        };
         occ_s.push(sample(occ * 100.0, occ * 100.0));
         alu_s.push(sample(alu / dur, alu));
         br_s.push(sample(br / dur, br));
         tex_s.push(sample(tex / dur, tex));
         if let Some(f) = frags {
-            if is_gl { frag_gl.push(sample(f, f)) } else { frag_gpu.push(sample(f, f)) }
+            if is_gl {
+                frag_gl.push(sample(f, f))
+            } else {
+                frag_gpu.push(sample(f, f))
+            }
         }
     }
     if !frag_gpu.is_empty() && frag_gpu.iter().all(|s| s.total <= 1.0) {
@@ -1396,7 +1929,11 @@ fn counters(
     for f in failures {
         notes.push(format!("shader analysis n/a: {f}"));
     }
-    let track = |name: &str, unit: &str, samples| CounterTrack { name: name.into(), unit: unit.into(), samples };
+    let track = |name: &str, unit: &str, samples| CounterTrack {
+        name: name.into(),
+        unit: unit.into(),
+        samples,
+    };
     let mut out = vec![
         track("Occupancy (est.)", "%", occ_s),
         track("ALU ops/ns (est.)", "ops/ns", alu_s),
@@ -1407,7 +1944,11 @@ fn counters(
         out.push(track("Fragments (post-depth)", "fragments", frag_gpu));
     }
     if !frag_gl.is_empty() {
-        out.push(track("Fragments (rasterized, pre-depth)", "fragments", frag_gl));
+        out.push(track(
+            "Fragments (rasterized, pre-depth)",
+            "fragments",
+            frag_gl,
+        ));
     }
     out
 }

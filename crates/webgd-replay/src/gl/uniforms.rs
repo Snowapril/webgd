@@ -34,8 +34,21 @@ fn setter(ty: u32) -> Option<(&'static str, bool)> {
 pub fn is_sampler(ty: u32) -> bool {
     matches!(
         ty,
-        0x8B5E | 0x8B5F | 0x8B60 | 0x8B62 | 0x8DC1 | 0x8DC4 | 0x8DC5 | 0x8DCA | 0x8DCB | 0x8DCC | 0x8DCF | 0x8DD2
-            | 0x8DD3 | 0x8DD4 | 0x8DD7
+        0x8B5E
+            | 0x8B5F
+            | 0x8B60
+            | 0x8B62
+            | 0x8DC1
+            | 0x8DC4
+            | 0x8DC5
+            | 0x8DCA
+            | 0x8DCB
+            | 0x8DCC
+            | 0x8DCF
+            | 0x8DD2
+            | 0x8DD3
+            | 0x8DD4
+            | 0x8DD7
     )
 }
 
@@ -53,7 +66,8 @@ pub fn sampler_binding(ty: u32) -> u32 {
 /// Sets uniform `loc` of type `ty` from a `getUniform`-shaped value
 /// (number, boolean, typed array or array of booleans).
 pub fn set_uniform(gl: &JsValue, ty: u32, loc: &JsValue, value: &JsValue) -> Result<(), JsValue> {
-    let (method, matrix) = setter(ty).ok_or_else(|| JsValue::from_str(&format!("unknown uniform type 0x{ty:X}")))?;
+    let (method, matrix) =
+        setter(ty).ok_or_else(|| JsValue::from_str(&format!("unknown uniform type 0x{ty:X}")))?;
     let v = if js::is_obj(value) {
         if js_sys::Array::is_array(value) {
             // bvec: map booleans to ints.

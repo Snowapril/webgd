@@ -11,11 +11,17 @@ use webgd_core::track::gl::texture_dims;
 use webgd_core::{Capture, ObjId};
 
 fn leaf(name: &str, value: String) -> StateNode {
-    StateNode::Leaf { name: name.to_string(), value }
+    StateNode::Leaf {
+        name: name.to_string(),
+        value,
+    }
 }
 
 fn group(name: &str, children: Vec<StateNode>) -> StateNode {
-    StateNode::Group { name: name.to_string(), children }
+    StateNode::Group {
+        name: name.to_string(),
+        children,
+    }
 }
 
 /// Formats a getParameter-style value; objects are labelled via the reverse map.
@@ -36,10 +42,15 @@ fn fmt(st: &ReplayState, cap: &Capture, v: &JsValue) -> String {
         return obj_label(cap, id);
     }
     if js::is_obj(&js::get(v, "length")) || js::get(v, "length").as_f64().is_some() {
-        let items: Vec<String> = js_sys::Array::from(v).iter().map(|x| fmt(st, cap, &x)).collect();
+        let items: Vec<String> = js_sys::Array::from(v)
+            .iter()
+            .map(|x| fmt(st, cap, &x))
+            .collect();
         return format!("[{}]", items.join(", "));
     }
-    js::get(&js::get(v, "constructor"), "name").as_string().unwrap_or_else(|| "object".into())
+    js::get(&js::get(v, "constructor"), "name")
+        .as_string()
+        .unwrap_or_else(|| "object".into())
 }
 
 fn fmt_enum(v: &JsValue) -> String {
@@ -59,7 +70,13 @@ fn fmt_factor(v: &JsValue) -> String {
 }
 
 pub fn inspect(st: &ReplayState, cap: &Capture, index: usize, ctx: &GlCtx) -> Inspection {
-    let mut ins = Inspection { index, targets: Vec::new(), pipeline: Vec::new(), bindings: Vec::new(), notes: Vec::new() };
+    let mut ins = Inspection {
+        index,
+        targets: Vec::new(),
+        pipeline: Vec::new(),
+        bindings: Vec::new(),
+        notes: Vec::new(),
+    };
     targets(st, cap, index, ctx, &mut ins);
     pipeline(st, cap, ctx, &mut ins);
     bindings(st, cap, ctx, &mut ins);
@@ -67,15 +84,32 @@ pub fn inspect(st: &ReplayState, cap: &Capture, index: usize, ctx: &GlCtx) -> In
 }
 
 fn attachment_param(ctx: &GlCtx, target: u32, att: u32, pname: u32) -> JsValue {
-    ctx.call("getFramebufferAttachmentParameter", &[n(target), n(att), n(pname)]).unwrap_or(JsValue::NULL)
+    ctx.call(
+        "getFramebufferAttachmentParameter",
+        &[n(target), n(att), n(pname)],
+    )
+    .unwrap_or(JsValue::NULL)
 }
 
 fn class_of_attachment(ctx: &GlCtx, target: u32, att: u32) -> ReadClass {
-    match js::u(&attachment_param(ctx, target, att, FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE)) {
+    match js::u(&attachment_param(
+        ctx,
+        target,
+        att,
+        FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE,
+    )) {
         FLOAT => ReadClass::Float,
         INT => ReadClass::Int,
         UNSIGNED_INT => ReadClass::Uint,
-        _ if js::u(&attachment_param(ctx, target, att, FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING)) == SRGB => ReadClass::Srgb,
+        _ if js::u(&attachment_param(
+            ctx,
+            target,
+            att,
+            FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
+        )) == SRGB =>
+        {
+            ReadClass::Srgb
+        }
         _ => ReadClass::Unorm,
     }
 }
@@ -83,8 +117,18 @@ fn class_of_attachment(ctx: &GlCtx, target: u32, att: u32) -> ReadClass {
 fn rb_info(ctx: &GlCtx, rb: &JsValue) -> (u32, u32, u32, u32) {
     let prev = ctx.param(RENDERBUFFER_BINDING);
     let _ = ctx.call("bindRenderbuffer", &[n(RENDERBUFFER), rb.clone()]);
-    let p = |pn: u32| js::u(&ctx.call("getRenderbufferParameter", &[n(RENDERBUFFER), n(pn)]).unwrap_or_default());
-    let r = (p(RENDERBUFFER_WIDTH), p(RENDERBUFFER_HEIGHT), p(RENDERBUFFER_INTERNAL_FORMAT), p(RENDERBUFFER_SAMPLES));
+    let p = |pn: u32| {
+        js::u(
+            &ctx.call("getRenderbufferParameter", &[n(RENDERBUFFER), n(pn)])
+                .unwrap_or_default(),
+        )
+    };
+    let r = (
+        p(RENDERBUFFER_WIDTH),
+        p(RENDERBUFFER_HEIGHT),
+        p(RENDERBUFFER_INTERNAL_FORMAT),
+        p(RENDERBUFFER_SAMPLES),
+    );
     let _ = ctx.call("bindRenderbuffer", &[n(RENDERBUFFER), prev]);
     r
 }
@@ -102,7 +146,12 @@ fn targets(st: &ReplayState, cap: &Capture, index: usize, ctx: &GlCtx, ins: &mut
             Ok(i) => (Some(i), None),
             Err(e) => (None, Some(e)),
         };
-        ins.targets.push(TargetView { label: "Default framebuffer".into(), resource: None, image, note });
+        ins.targets.push(TargetView {
+            label: "Default framebuffer".into(),
+            resource: None,
+            image,
+            note,
+        });
         return;
     }
     let max_db = js::u(&ctx.param(MAX_DRAW_BUFFERS));
@@ -111,11 +160,21 @@ fn targets(st: &ReplayState, cap: &Capture, index: usize, ctx: &GlCtx, ins: &mut
         if db == NONE {
             continue;
         }
-        let ty = js::u(&attachment_param(ctx, DRAW_FRAMEBUFFER, db, FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE));
+        let ty = js::u(&attachment_param(
+            ctx,
+            DRAW_FRAMEBUFFER,
+            db,
+            FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+        ));
         if ty == NONE {
             continue;
         }
-        let obj = attachment_param(ctx, DRAW_FRAMEBUFFER, db, FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+        let obj = attachment_param(
+            ctx,
+            DRAW_FRAMEBUFFER,
+            db,
+            FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+        );
         let id = st.objs.id_of(&obj);
         let class = class_of_attachment(ctx, DRAW_FRAMEBUFFER, db);
         let label = format!("{} (draw buffer {i})", enum_name(db));
@@ -127,15 +186,42 @@ fn targets(st: &ReplayState, cap: &Capture, index: usize, ctx: &GlCtx, ins: &mut
                 ctx.read_attachment(&Attach::Rb(obj.clone()), w, h, class)
             }
         } else {
-            let level = js::u(&attachment_param(ctx, DRAW_FRAMEBUFFER, db, FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL));
-            let face_e = js::u(&attachment_param(ctx, DRAW_FRAMEBUFFER, db, FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE));
-            let layer = js::u(&attachment_param(ctx, DRAW_FRAMEBUFFER, db, FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER));
-            let face = face_e.checked_sub(TEXTURE_CUBE_MAP_POSITIVE_X).filter(|f| *f < 6).unwrap_or(0);
+            let level = js::u(&attachment_param(
+                ctx,
+                DRAW_FRAMEBUFFER,
+                db,
+                FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL,
+            ));
+            let face_e = js::u(&attachment_param(
+                ctx,
+                DRAW_FRAMEBUFFER,
+                db,
+                FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE,
+            ));
+            let layer = js::u(&attachment_param(
+                ctx,
+                DRAW_FRAMEBUFFER,
+                db,
+                FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER,
+            ));
+            let face = face_e
+                .checked_sub(TEXTURE_CUBE_MAP_POSITIVE_X)
+                .filter(|f| *f < 6)
+                .unwrap_or(0);
             match id.and_then(|id| texture_dims(cap, index, id)) {
                 Some(d) => match d.levels.get(&(level, face)) {
-                    Some(&(w, h, _)) => {
-                        ctx.read_attachment(&Attach::Tex { tex: obj.clone(), target: d.target, level, face, layer }, w, h, class)
-                    }
+                    Some(&(w, h, _)) => ctx.read_attachment(
+                        &Attach::Tex {
+                            tex: obj.clone(),
+                            target: d.target,
+                            level,
+                            face,
+                            layer,
+                        },
+                        w,
+                        h,
+                        class,
+                    ),
                     None => Err(format!("level {level} dimensions unknown")),
                 },
                 None => Err("texture dimensions unknown".into()),
@@ -145,17 +231,41 @@ fn targets(st: &ReplayState, cap: &Capture, index: usize, ctx: &GlCtx, ins: &mut
             Ok(i) => (Some(i), None),
             Err(e) => (None, Some(e)),
         };
-        ins.targets.push(TargetView { label, resource: id, image, note });
+        ins.targets.push(TargetView {
+            label,
+            resource: id,
+            image,
+            note,
+        });
     }
-    for att in [DEPTH_ATTACHMENT, STENCIL_ATTACHMENT, DEPTH_STENCIL_ATTACHMENT] {
-        if att == DEPTH_STENCIL_ATTACHMENT && ins.targets.iter().any(|t| t.label.starts_with("DEPTH") || t.label.starts_with("STENCIL")) {
+    for att in [
+        DEPTH_ATTACHMENT,
+        STENCIL_ATTACHMENT,
+        DEPTH_STENCIL_ATTACHMENT,
+    ] {
+        if att == DEPTH_STENCIL_ATTACHMENT
+            && ins
+                .targets
+                .iter()
+                .any(|t| t.label.starts_with("DEPTH") || t.label.starts_with("STENCIL"))
+        {
             continue;
         }
-        let ty = js::u(&attachment_param(ctx, DRAW_FRAMEBUFFER, att, FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE));
+        let ty = js::u(&attachment_param(
+            ctx,
+            DRAW_FRAMEBUFFER,
+            att,
+            FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+        ));
         if ty == NONE {
             continue;
         }
-        let obj = attachment_param(ctx, DRAW_FRAMEBUFFER, att, FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+        let obj = attachment_param(
+            ctx,
+            DRAW_FRAMEBUFFER,
+            att,
+            FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+        );
         ins.targets.push(TargetView {
             label: enum_name(att),
             resource: st.objs.id_of(&obj),
@@ -174,14 +284,32 @@ fn pipeline(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
     let prog = p(CURRENT_PROGRAM);
     let mut prog_children = vec![leaf("CURRENT_PROGRAM", fmt(st, cap, &prog))];
     if js::is_obj(&prog) {
-        let link = ctx.call("getProgramParameter", &[prog.clone(), n(LINK_STATUS)]).unwrap_or_default();
+        let link = ctx
+            .call("getProgramParameter", &[prog.clone(), n(LINK_STATUS)])
+            .unwrap_or_default();
         prog_children.push(leaf("LINK_STATUS", fmt(st, cap, &link)));
     }
     let stencil = |back: bool| {
         let (f, r, m, sf, zf, zp, w) = if back {
-            (STENCIL_BACK_FUNC, STENCIL_BACK_REF, STENCIL_BACK_VALUE_MASK, STENCIL_BACK_FAIL, STENCIL_BACK_PASS_DEPTH_FAIL, STENCIL_BACK_PASS_DEPTH_PASS, STENCIL_BACK_WRITEMASK)
+            (
+                STENCIL_BACK_FUNC,
+                STENCIL_BACK_REF,
+                STENCIL_BACK_VALUE_MASK,
+                STENCIL_BACK_FAIL,
+                STENCIL_BACK_PASS_DEPTH_FAIL,
+                STENCIL_BACK_PASS_DEPTH_PASS,
+                STENCIL_BACK_WRITEMASK,
+            )
         } else {
-            (STENCIL_FUNC, STENCIL_REF, STENCIL_VALUE_MASK, STENCIL_FAIL, STENCIL_PASS_DEPTH_FAIL, STENCIL_PASS_DEPTH_PASS, STENCIL_WRITEMASK)
+            (
+                STENCIL_FUNC,
+                STENCIL_REF,
+                STENCIL_VALUE_MASK,
+                STENCIL_FAIL,
+                STENCIL_PASS_DEPTH_FAIL,
+                STENCIL_PASS_DEPTH_PASS,
+                STENCIL_WRITEMASK,
+            )
         };
         group(
             if back { "Back" } else { "Front" },
@@ -197,7 +325,10 @@ fn pipeline(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
         )
     };
     let max_db = js::u(&p(MAX_DRAW_BUFFERS));
-    let mut dbs = vec![leaf("DRAW_FRAMEBUFFER_BINDING", v(DRAW_FRAMEBUFFER_BINDING))];
+    let mut dbs = vec![leaf(
+        "DRAW_FRAMEBUFFER_BINDING",
+        v(DRAW_FRAMEBUFFER_BINDING),
+    )];
     for i in 0..max_db {
         let d = js::u(&p(DRAW_BUFFER0 + i));
         if d != NONE {
@@ -229,7 +360,14 @@ fn pipeline(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
                 leaf("DEPTH_RANGE", v(DEPTH_RANGE)),
             ],
         ),
-        group("Stencil", vec![leaf("STENCIL_TEST", en(STENCIL_TEST)), stencil(false), stencil(true)]),
+        group(
+            "Stencil",
+            vec![
+                leaf("STENCIL_TEST", en(STENCIL_TEST)),
+                stencil(false),
+                stencil(true),
+            ],
+        ),
         group(
             "Blend",
             vec![
@@ -243,7 +381,13 @@ fn pipeline(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
                 leaf("BLEND_COLOR", v(BLEND_COLOR)),
             ],
         ),
-        group("ColorMask", vec![leaf("COLOR_WRITEMASK", v(COLOR_WRITEMASK)), leaf("DITHER", en(DITHER))]),
+        group(
+            "ColorMask",
+            vec![
+                leaf("COLOR_WRITEMASK", v(COLOR_WRITEMASK)),
+                leaf("DITHER", en(DITHER)),
+            ],
+        ),
         group(
             "Viewport/Scissor",
             vec![
@@ -274,8 +418,15 @@ struct ActiveVar {
 }
 
 fn active(ctx: &GlCtx, prog: &JsValue, method: &str, i: u32) -> Option<ActiveVar> {
-    let info = ctx.call(method, &[prog.clone(), n(i)]).ok().filter(js::is_obj)?;
-    Some(ActiveVar { name: js::get(&info, "name").as_string()?, size: js::u(&js::get(&info, "size")), ty: js::u(&js::get(&info, "type")) })
+    let info = ctx
+        .call(method, &[prog.clone(), n(i)])
+        .ok()
+        .filter(js::is_obj)?;
+    Some(ActiveVar {
+        name: js::get(&info, "name").as_string()?,
+        size: js::u(&js::get(&info, "size")),
+        ty: js::u(&js::get(&info, "type")),
+    })
 }
 
 /// Expanded element names of an active uniform (`a[0]` with size 3 → `a[0]`, `a[1]`, `a[2]`).
@@ -289,12 +440,20 @@ fn element_names(v: &ActiveVar) -> Vec<String> {
 
 /// Active non-block uniforms of `prog` as (element name, type).
 pub fn plain_uniforms(ctx: &GlCtx, prog: &JsValue) -> Vec<(String, u32)> {
-    let count = js::u(&ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_UNIFORMS)]).unwrap_or_default());
+    let count = js::u(
+        &ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_UNIFORMS)])
+            .unwrap_or_default(),
+    );
     let mut out = Vec::new();
     for i in 0..count {
-        let Some(var) = active(ctx, prog, "getActiveUniform", i) else { continue };
+        let Some(var) = active(ctx, prog, "getActiveUniform", i) else {
+            continue;
+        };
         let block = ctx
-            .call("getActiveUniforms", &[prog.clone(), js::arr(&[n(i)]), n(UNIFORM_BLOCK_INDEX)])
+            .call(
+                "getActiveUniforms",
+                &[prog.clone(), js::arr(&[n(i)]), n(UNIFORM_BLOCK_INDEX)],
+            )
             .map(|a| js::get_idx(&a, 0))
             .unwrap_or_default();
         if js::f(&block) >= 0.0 {
@@ -315,24 +474,51 @@ fn bindings(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
     }
     // Attributes.
     if js::is_obj(&prog) {
-        let count = js::u(&ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_ATTRIBUTES)]).unwrap_or_default());
+        let count = js::u(
+            &ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_ATTRIBUTES)])
+                .unwrap_or_default(),
+        );
         for i in 0..count {
-            let Some(var) = active(ctx, &prog, "getActiveAttrib", i) else { continue };
-            let loc = js::f(&ctx.call("getAttribLocation", &[prog.clone(), var.name.as_str().into()]).unwrap_or_default());
+            let Some(var) = active(ctx, &prog, "getActiveAttrib", i) else {
+                continue;
+            };
+            let loc = js::f(
+                &ctx.call(
+                    "getAttribLocation",
+                    &[prog.clone(), var.name.as_str().into()],
+                )
+                .unwrap_or_default(),
+            );
             if loc < 0.0 {
                 continue;
             }
-            let a = |pn: u32| ctx.call("getVertexAttrib", &[js::num(loc), n(pn)]).unwrap_or_default();
+            let a = |pn: u32| {
+                ctx.call("getVertexAttrib", &[js::num(loc), n(pn)])
+                    .unwrap_or_default()
+            };
             let buf = a(VERTEX_ATTRIB_ARRAY_BUFFER_BINDING);
             let enabled = js::truthy(&a(VERTEX_ATTRIB_ARRAY_ENABLED));
             let detail = if enabled {
-                let off = ctx.call("getVertexAttribOffset", &[js::num(loc), n(VERTEX_ATTRIB_ARRAY_POINTER)]).unwrap_or_default();
+                let off = ctx
+                    .call(
+                        "getVertexAttribOffset",
+                        &[js::num(loc), n(VERTEX_ATTRIB_ARRAY_POINTER)],
+                    )
+                    .unwrap_or_default();
                 format!(
                     "{} × {}{}{}, stride {}, offset {}, divisor {}",
                     js::u(&a(VERTEX_ATTRIB_ARRAY_SIZE)),
                     enum_name(js::u(&a(VERTEX_ATTRIB_ARRAY_TYPE))),
-                    if js::truthy(&a(VERTEX_ATTRIB_ARRAY_NORMALIZED)) { " normalized" } else { "" },
-                    if js::truthy(&a(VERTEX_ATTRIB_ARRAY_INTEGER)) { " integer" } else { "" },
+                    if js::truthy(&a(VERTEX_ATTRIB_ARRAY_NORMALIZED)) {
+                        " normalized"
+                    } else {
+                        ""
+                    },
+                    if js::truthy(&a(VERTEX_ATTRIB_ARRAY_INTEGER)) {
+                        " integer"
+                    } else {
+                        ""
+                    },
                     js::u(&a(VERTEX_ATTRIB_ARRAY_STRIDE)),
                     js::f(&off),
                     js::u(&a(VERTEX_ATTRIB_ARRAY_DIVISOR)),
@@ -361,11 +547,15 @@ fn bindings(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
     // Uniforms + textures.
     let prev_active = ctx.param(ACTIVE_TEXTURE);
     for (name, ty) in plain_uniforms(ctx, &prog) {
-        let loc = ctx.call("getUniformLocation", &[prog.clone(), name.as_str().into()]).unwrap_or(JsValue::NULL);
+        let loc = ctx
+            .call("getUniformLocation", &[prog.clone(), name.as_str().into()])
+            .unwrap_or(JsValue::NULL);
         if loc.is_null() {
             continue;
         }
-        let val = ctx.call("getUniform", &[prog.clone(), loc]).unwrap_or_default();
+        let val = ctx
+            .call("getUniform", &[prog.clone(), loc])
+            .unwrap_or_default();
         ins.bindings.push(BindingRow {
             group: "Uniforms".into(),
             slot: format!("{name} ({})", enum_name(ty)),
@@ -395,13 +585,34 @@ fn bindings(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
     }
     let _ = ctx.call("activeTexture", &[prev_active]);
     // Uniform blocks.
-    let blocks = js::u(&ctx.call("getProgramParameter", &[prog.clone(), n(ACTIVE_UNIFORM_BLOCKS)]).unwrap_or_default());
+    let blocks = js::u(
+        &ctx.call(
+            "getProgramParameter",
+            &[prog.clone(), n(ACTIVE_UNIFORM_BLOCKS)],
+        )
+        .unwrap_or_default(),
+    );
     for i in 0..blocks {
-        let name = ctx.call("getActiveUniformBlockName", &[prog.clone(), n(i)]).ok().and_then(|v| v.as_string()).unwrap_or_default();
-        let bp = |pn: u32| js::u(&ctx.call("getActiveUniformBlockParameter", &[prog.clone(), n(i), n(pn)]).unwrap_or_default());
+        let name = ctx
+            .call("getActiveUniformBlockName", &[prog.clone(), n(i)])
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        let bp = |pn: u32| {
+            js::u(
+                &ctx.call(
+                    "getActiveUniformBlockParameter",
+                    &[prog.clone(), n(i), n(pn)],
+                )
+                .unwrap_or_default(),
+            )
+        };
         let binding = bp(UNIFORM_BLOCK_BINDING);
         let data_size = bp(UNIFORM_BLOCK_DATA_SIZE);
-        let ip = |pn: u32| ctx.call("getIndexedParameter", &[n(pn), n(binding)]).unwrap_or_default();
+        let ip = |pn: u32| {
+            ctx.call("getIndexedParameter", &[n(pn), n(binding)])
+                .unwrap_or_default()
+        };
         let buf = ip(UNIFORM_BUFFER_BINDING);
         ins.bindings.push(BindingRow {
             group: "Uniform blocks".into(),
@@ -418,19 +629,29 @@ fn bindings(st: &ReplayState, cap: &Capture, ctx: &GlCtx, ins: &mut Inspection) 
 }
 
 /// `getBufferSubData` of a WebGL buffer.
-pub fn read_buffer(ctx: &GlCtx, cap: &Capture, id: ObjId, buf: &JsValue) -> Result<Vec<u8>, String> {
+pub fn read_buffer(
+    ctx: &GlCtx,
+    cap: &Capture,
+    id: ObjId,
+    buf: &JsValue,
+) -> Result<Vec<u8>, String> {
     let is_index = cap
         .snapshot
         .iter()
-        .find(|c| cap.method(c) == "webgd:glBuffer" && c.args.first().and_then(|a| a.as_obj()) == Some(id))
+        .find(|c| {
+            cap.method(c) == "webgd:glBuffer" && c.args.first().and_then(|a| a.as_obj()) == Some(id)
+        })
         .and_then(|c| c.args.get(1))
         .and_then(|d| cap.dict_get(d, "isIndex"))
         .and_then(|v| v.as_f64())
         .map(|v| v != 0.0)
         .unwrap_or_else(|| {
             cap.setup.iter().chain(cap.frame.iter()).find_map(|c| {
-                (cap.method(c) == "bindBuffer" && c.args.get(1).and_then(|a| a.as_obj()) == Some(id))
-                    .then(|| c.args.first().and_then(|a| a.as_f64()) == Some(ELEMENT_ARRAY_BUFFER as f64))
+                (cap.method(c) == "bindBuffer"
+                    && c.args.get(1).and_then(|a| a.as_obj()) == Some(id))
+                .then(|| {
+                    c.args.first().and_then(|a| a.as_f64()) == Some(ELEMENT_ARRAY_BUFFER as f64)
+                })
             }) == Some(true)
         });
     let (target, saved) = if is_index {
@@ -441,9 +662,15 @@ pub fn read_buffer(ctx: &GlCtx, cap: &Capture, id: ObjId, buf: &JsValue) -> Resu
         (COPY_READ_BUFFER, ctx.save(&[COPY_READ_BUFFER_BINDING], &[]))
     };
     let _ = ctx.call("bindBuffer", &[n(target), buf.clone()]);
-    let size = js::u(&ctx.call("getBufferParameter", &[n(target), n(BUFFER_SIZE)]).unwrap_or_default());
+    let size = js::u(
+        &ctx.call("getBufferParameter", &[n(target), n(BUFFER_SIZE)])
+            .unwrap_or_default(),
+    );
     let out = js::construct("Uint8Array", &[n(size)])
-        .and_then(|dst| ctx.call("getBufferSubData", &[n(target), n(0), dst.clone()]).map(|_| dst))
+        .and_then(|dst| {
+            ctx.call("getBufferSubData", &[n(target), n(0), dst.clone()])
+                .map(|_| dst)
+        })
         .map(|dst| js::bytes_of(&dst))
         .map_err(|e| js::err_msg(&e));
     if is_index {
@@ -454,7 +681,15 @@ pub fn read_buffer(ctx: &GlCtx, cap: &Capture, id: ObjId, buf: &JsValue) -> Resu
 }
 
 /// Reads a texture level/face/layer or a renderbuffer as of the replayed point.
-pub fn read_image(ctx: &GlCtx, cap: &Capture, stop: usize, id: ObjId, obj: &JsValue, mip: u32, layer: u32) -> Result<Image, String> {
+pub fn read_image(
+    ctx: &GlCtx,
+    cap: &Capture,
+    stop: usize,
+    id: ObjId,
+    obj: &JsValue,
+    mip: u32,
+    layer: u32,
+) -> Result<Image, String> {
     if cap.class_of(id) == "WebGLRenderbuffer" {
         let (w, h, ifmt, samples) = rb_info(ctx, obj);
         if samples > 0 {
@@ -465,9 +700,22 @@ pub fn read_image(ctx: &GlCtx, cap: &Capture, stop: usize, id: ObjId, obj: &JsVa
     }
     let d = texture_dims(cap, stop, id).ok_or("texture dimensions unknown")?;
     let class = read_class(d.internalformat).ok_or("depth/stencil not readable in WebGL2")?;
-    let (face, layer) = if d.target == TEXTURE_CUBE_MAP { (layer.min(5), 0) } else { (0, layer) };
-    let &(w, h, _) = d.levels.get(&(mip, face)).ok_or_else(|| format!("mip {mip} not defined"))?;
-    let att = Attach::Tex { tex: obj.clone(), target: d.target, level: mip, face, layer };
+    let (face, layer) = if d.target == TEXTURE_CUBE_MAP {
+        (layer.min(5), 0)
+    } else {
+        (0, layer)
+    };
+    let &(w, h, _) = d
+        .levels
+        .get(&(mip, face))
+        .ok_or_else(|| format!("mip {mip} not defined"))?;
+    let att = Attach::Tex {
+        tex: obj.clone(),
+        target: d.target,
+        level: mip,
+        face,
+        layer,
+    };
     match ctx.read_attachment(&att, w, h, class) {
         Ok(img) => Ok(img),
         Err(_) => sample_read(ctx, obj, d.target, mip, face, layer, w, h, class),
@@ -498,7 +746,17 @@ fn sample_fs(prefix: &str, target: u32) -> String {
 /// Readback of non-renderable textures (LUMINANCE, compressed, RGB32F, …) by drawing `texelFetch`
 /// into a float/int renderbuffer.
 #[allow(clippy::too_many_arguments)]
-fn sample_read(ctx: &GlCtx, tex: &JsValue, target: u32, level: u32, face: u32, layer: u32, w: u32, h: u32, class: ReadClass) -> Result<Image, String> {
+fn sample_read(
+    ctx: &GlCtx,
+    tex: &JsValue,
+    target: u32,
+    level: u32,
+    face: u32,
+    layer: u32,
+    w: u32,
+    h: u32,
+    class: ReadClass,
+) -> Result<Image, String> {
     let (prefix, kind, rb_fmt, out_class) = match class {
         ReadClass::Int => ("i", 1, RGBA32I, ReadClass::Int),
         ReadClass::Uint => ("u", 2, RGBA32UI, ReadClass::Uint),
@@ -524,8 +782,28 @@ fn sample_read(ctx: &GlCtx, tex: &JsValue, target: u32, level: u32, face: u32, l
         _ => TEXTURE_BINDING_2D,
     };
     let saved = ctx.save(
-        &[CURRENT_PROGRAM, VERTEX_ARRAY_BINDING, DRAW_FRAMEBUFFER_BINDING, READ_FRAMEBUFFER_BINDING, RENDERBUFFER_BINDING, VIEWPORT, COLOR_WRITEMASK, ACTIVE_TEXTURE],
-        &[BLEND, CULL_FACE, DEPTH_TEST, STENCIL_TEST, SCISSOR_TEST, RASTERIZER_DISCARD, SAMPLE_ALPHA_TO_COVERAGE, SAMPLE_COVERAGE, POLYGON_OFFSET_FILL, DITHER],
+        &[
+            CURRENT_PROGRAM,
+            VERTEX_ARRAY_BINDING,
+            DRAW_FRAMEBUFFER_BINDING,
+            READ_FRAMEBUFFER_BINDING,
+            RENDERBUFFER_BINDING,
+            VIEWPORT,
+            COLOR_WRITEMASK,
+            ACTIVE_TEXTURE,
+        ],
+        &[
+            BLEND,
+            CULL_FACE,
+            DEPTH_TEST,
+            STENCIL_TEST,
+            SCISSOR_TEST,
+            RASTERIZER_DISCARD,
+            SAMPLE_ALPHA_TO_COVERAGE,
+            SAMPLE_COVERAGE,
+            POLYGON_OFFSET_FILL,
+            DITHER,
+        ],
     );
     let unit = ctx.scratch_unit;
     ctx.c("activeTexture", &[(TEXTURE0 + unit) as f64]);
@@ -533,32 +811,76 @@ fn sample_read(ctx: &GlCtx, tex: &JsValue, target: u32, level: u32, face: u32, l
     let prev_sampler = ctx.param(SAMPLER_BINDING);
     ctx.bind_tex(target, tex);
     let _ = ctx.call("bindSampler", &[n(unit), JsValue::NULL]);
-    let tp = [TEXTURE_BASE_LEVEL, TEXTURE_MAX_LEVEL, TEXTURE_MIN_FILTER, TEXTURE_MAG_FILTER, TEXTURE_COMPARE_MODE];
-    let prev_params: Vec<JsValue> =
-        tp.iter().map(|p| ctx.call("getTexParameter", &[n(target), n(*p)]).unwrap_or_default()).collect();
+    let tp = [
+        TEXTURE_BASE_LEVEL,
+        TEXTURE_MAX_LEVEL,
+        TEXTURE_MIN_FILTER,
+        TEXTURE_MAG_FILTER,
+        TEXTURE_COMPARE_MODE,
+    ];
+    let prev_params: Vec<JsValue> = tp
+        .iter()
+        .map(|p| {
+            ctx.call("getTexParameter", &[n(target), n(*p)])
+                .unwrap_or_default()
+        })
+        .collect();
     for (p, v) in tp.iter().zip([level, level, NEAREST, NEAREST, NONE]) {
         ctx.c("texParameteri", &[target as f64, *p as f64, v as f64]);
     }
-    let rb = ctx.call("createRenderbuffer", &[]).map_err(|e| js::err_msg(&e))?;
+    let rb = ctx
+        .call("createRenderbuffer", &[])
+        .map_err(|e| js::err_msg(&e))?;
     let _ = ctx.call("bindRenderbuffer", &[n(RENDERBUFFER), rb.clone()]);
-    ctx.c("renderbufferStorage", &[RENDERBUFFER as f64, rb_fmt as f64, w as f64, h as f64]);
-    let fbo = ctx.call("createFramebuffer", &[]).map_err(|e| js::err_msg(&e))?;
+    ctx.c(
+        "renderbufferStorage",
+        &[RENDERBUFFER as f64, rb_fmt as f64, w as f64, h as f64],
+    );
+    let fbo = ctx
+        .call("createFramebuffer", &[])
+        .map_err(|e| js::err_msg(&e))?;
     ctx.bind_fb(FRAMEBUFFER, &fbo);
-    let _ = ctx.call("framebufferRenderbuffer", &[n(FRAMEBUFFER), n(COLOR_ATTACHMENT0), n(RENDERBUFFER), rb.clone()]);
+    let _ = ctx.call(
+        "framebufferRenderbuffer",
+        &[
+            n(FRAMEBUFFER),
+            n(COLOR_ATTACHMENT0),
+            n(RENDERBUFFER),
+            rb.clone(),
+        ],
+    );
     let _ = ctx.call("drawBuffers", &[js::arr(&[n(COLOR_ATTACHMENT0)])]);
-    for c in [BLEND, CULL_FACE, DEPTH_TEST, STENCIL_TEST, SCISSOR_TEST, RASTERIZER_DISCARD, SAMPLE_ALPHA_TO_COVERAGE, SAMPLE_COVERAGE] {
+    for c in [
+        BLEND,
+        CULL_FACE,
+        DEPTH_TEST,
+        STENCIL_TEST,
+        SCISSOR_TEST,
+        RASTERIZER_DISCARD,
+        SAMPLE_ALPHA_TO_COVERAGE,
+        SAMPLE_COVERAGE,
+    ] {
         ctx.c("disable", &[c as f64]);
     }
-    let _ = ctx.call("colorMask", &[JsValue::TRUE, JsValue::TRUE, JsValue::TRUE, JsValue::TRUE]);
+    let _ = ctx.call(
+        "colorMask",
+        &[JsValue::TRUE, JsValue::TRUE, JsValue::TRUE, JsValue::TRUE],
+    );
     ctx.c("viewport", &[0.0, 0.0, w as f64, h as f64]);
     let _ = ctx.call("useProgram", std::slice::from_ref(&prog));
-    let loc = |name: &str| ctx.call("getUniformLocation", &[prog.clone(), name.into()]).unwrap_or(JsValue::NULL);
+    let loc = |name: &str| {
+        ctx.call("getUniformLocation", &[prog.clone(), name.into()])
+            .unwrap_or(JsValue::NULL)
+    };
     let _ = ctx.call("uniform1i", &[loc("t"), n(unit)]);
     let _ = ctx.call("uniform1i", &[loc("u_layer"), n(layer)]);
     let _ = ctx.call("uniform1i", &[loc("u_face"), n(face)]);
     let _ = ctx.call("uniform2f", &[loc("u_size"), n(w), n(h)]);
     let _ = ctx.call("bindVertexArray", std::slice::from_ref(&ctx.scratch_vao));
-    let status = js::u(&ctx.call("checkFramebufferStatus", &[n(FRAMEBUFFER)]).unwrap_or_default());
+    let status = js::u(
+        &ctx.call("checkFramebufferStatus", &[n(FRAMEBUFFER)])
+            .unwrap_or_default(),
+    );
     let res = if status == FRAMEBUFFER_COMPLETE {
         ctx.c("drawArrays", &[TRIANGLES as f64, 0.0, 3.0]);
         ctx.read_pixels(w, h, out_class)
@@ -577,13 +899,28 @@ fn sample_read(ctx: &GlCtx, tex: &JsValue, target: u32, level: u32, face: u32, l
 }
 
 pub fn program_info(ctx: &GlCtx, prog: &JsValue) -> ProgramInfo {
-    let link_status = js::truthy(&ctx.call("getProgramParameter", &[prog.clone(), n(LINK_STATUS)]).unwrap_or_default());
-    let info_log = ctx.call("getProgramInfoLog", std::slice::from_ref(prog)).ok().and_then(|v| v.as_string()).unwrap_or_default();
-    let count = |pn: u32| js::u(&ctx.call("getProgramParameter", &[prog.clone(), n(pn)]).unwrap_or_default());
+    let link_status = js::truthy(
+        &ctx.call("getProgramParameter", &[prog.clone(), n(LINK_STATUS)])
+            .unwrap_or_default(),
+    );
+    let info_log = ctx
+        .call("getProgramInfoLog", std::slice::from_ref(prog))
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_default();
+    let count = |pn: u32| {
+        js::u(
+            &ctx.call("getProgramParameter", &[prog.clone(), n(pn)])
+                .unwrap_or_default(),
+        )
+    };
     let attributes = (0..count(ACTIVE_ATTRIBUTES))
         .filter_map(|i| active(ctx, prog, "getActiveAttrib", i))
         .map(|v| {
-            let loc = js::f(&ctx.call("getAttribLocation", &[prog.clone(), v.name.as_str().into()]).unwrap_or_default());
+            let loc = js::f(
+                &ctx.call("getAttribLocation", &[prog.clone(), v.name.as_str().into()])
+                    .unwrap_or_default(),
+            );
             format!("{} : {}[{}] @ {loc}", v.name, enum_name(v.ty), v.size)
         })
         .collect();
@@ -591,5 +928,10 @@ pub fn program_info(ctx: &GlCtx, prog: &JsValue) -> ProgramInfo {
         .filter_map(|i| active(ctx, prog, "getActiveUniform", i))
         .map(|v| format!("{} : {}[{}]", v.name, enum_name(v.ty), v.size))
         .collect();
-    ProgramInfo { link_status, info_log, attributes, uniforms }
+    ProgramInfo {
+        link_status,
+        info_log,
+        attributes,
+        uniforms,
+    }
 }

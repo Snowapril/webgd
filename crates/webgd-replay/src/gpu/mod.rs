@@ -38,7 +38,11 @@ pub fn augment_buffer_usage(usage: u32) -> u32 {
 
 pub fn augment_texture_usage(usage: u32, sample_count: u32) -> u32 {
     use tex_usage::*;
-    if sample_count <= 1 && usage & TRANSIENT_ATTACHMENT == 0 { usage | COPY_SRC | COPY_DST } else { usage }
+    if sample_count <= 1 && usage & TRANSIENT_ATTACHMENT == 0 {
+        usage | COPY_SRC | COPY_DST
+    } else {
+        usage
+    }
 }
 
 fn align(v: u32, a: u32) -> u32 {
@@ -49,7 +53,12 @@ fn align(v: u32, a: u32) -> u32 {
 pub(crate) async fn map_read(staging: &JsValue, len: u32) -> Result<Vec<u8>, String> {
     let p = js::call(staging, "mapAsync", &[js::num(buf_usage::MAP_READ as f64)]).map_err(jserr)?;
     await_value(&p).await?;
-    let ab = js::call(staging, "getMappedRange", &[js::num(0.0), js::num(len as f64)]).map_err(jserr)?;
+    let ab = js::call(
+        staging,
+        "getMappedRange",
+        &[js::num(0.0), js::num(len as f64)],
+    )
+    .map_err(jserr)?;
     let out = js::bytes_of(&ab);
     let _ = js::call(staging, "unmap", &[]);
     Ok(out)
@@ -61,7 +70,10 @@ fn staging(device: &JsValue, size: u32) -> Result<JsValue, String> {
         "createBuffer",
         &[js::obj(&[
             ("size", js::num(align(size.max(4), 4) as f64)),
-            ("usage", js::num((buf_usage::MAP_READ | buf_usage::COPY_DST) as f64)),
+            (
+                "usage",
+                js::num((buf_usage::MAP_READ | buf_usage::COPY_DST) as f64),
+            ),
             ("label", "webgd:readback".into()),
         ])],
     )
@@ -84,8 +96,18 @@ pub async fn read_buffer(device: &JsValue, buffer: &JsValue) -> Result<Vec<u8>, 
     let enc = js::call(device, "createCommandEncoder", &[]).map_err(jserr)?;
     let copy = size & !3;
     if copy > 0 {
-        js::call(&enc, "copyBufferToBuffer", &[buffer.clone(), js::num(0.0), st.clone(), js::num(0.0), js::num(copy as f64)])
-            .map_err(jserr)?;
+        js::call(
+            &enc,
+            "copyBufferToBuffer",
+            &[
+                buffer.clone(),
+                js::num(0.0),
+                st.clone(),
+                js::num(0.0),
+                js::num(copy as f64),
+            ],
+        )
+        .map_err(jserr)?;
     }
     let cb = js::call(&enc, "finish", &[]).map_err(jserr)?;
     js::call(&js::get(device, "queue"), "submit", &[js::arr(&[cb])]).map_err(jserr)?;
@@ -95,7 +117,12 @@ pub async fn read_buffer(device: &JsValue, buffer: &JsValue) -> Result<Vec<u8>, 
     Ok(out)
 }
 
-pub async fn read_texture(device: &JsValue, tex: &JsValue, mip: u32, layer: u32) -> Result<Image, String> {
+pub async fn read_texture(
+    device: &JsValue,
+    tex: &JsValue,
+    mip: u32,
+    layer: u32,
+) -> Result<Image, String> {
     let format_s = js::get(tex, "format").as_string().unwrap_or_default();
     let pf = gpu_format(&format_s).ok_or_else(|| format!("format not viewable ({format_s})"))?;
     if js::f(&js::get(tex, "sampleCount")) > 1.0 {
@@ -127,10 +154,21 @@ pub async fn read_texture(device: &JsValue, tex: &JsValue, mip: u32, layer: u32)
             js::obj(&[
                 ("texture", tex.clone()),
                 ("mipLevel", js::num(mip as f64)),
-                ("origin", js::obj(&[("x", js::num(0.0)), ("y", js::num(0.0)), ("z", js::num(layer as f64))])),
+                (
+                    "origin",
+                    js::obj(&[
+                        ("x", js::num(0.0)),
+                        ("y", js::num(0.0)),
+                        ("z", js::num(layer as f64)),
+                    ]),
+                ),
                 ("aspect", aspect.into()),
             ]),
-            js::obj(&[("buffer", st.clone()), ("bytesPerRow", js::num(bpr as f64)), ("rowsPerImage", js::num(h as f64))]),
+            js::obj(&[
+                ("buffer", st.clone()),
+                ("bytesPerRow", js::num(bpr as f64)),
+                ("rowsPerImage", js::num(h as f64)),
+            ]),
             js::arr(&[js::num(w as f64), js::num(h as f64), js::num(1.0)]),
         ],
     )
@@ -153,5 +191,10 @@ pub async fn read_texture(device: &JsValue, tex: &JsValue, mip: u32, layer: u32)
         let s = y * bpr as usize;
         data.extend_from_slice(&raw[s..s + row as usize]);
     }
-    Ok(Image { width: w, height: h, format: pf, data })
+    Ok(Image {
+        width: w,
+        height: h,
+        format: pf,
+        data,
+    })
 }

@@ -25,7 +25,11 @@ pub fn value_label(cap: &Capture, v: &Value) -> String {
         }
         Value::ObjRef(id) => obj_label(cap, *id),
         Value::Typed { kind, blob } => {
-            format!("{}[{}]", kind.js_name(), cap.blob(*blob).len() / kind.element_size())
+            format!(
+                "{}[{}]",
+                kind.js_name(),
+                cap.blob(*blob).len() / kind.element_size()
+            )
         }
         Value::Array(a) => format!("[{}]", a.len()),
         Value::Dict(_) => "{…}".into(),
@@ -38,5 +42,10 @@ pub fn value_label(cap: &Capture, v: &Value) -> String {
 /// `Class#this.method(args)`.
 pub fn call_label(cap: &Capture, call: &Call) -> String {
     let args: Vec<String> = call.args.iter().map(|a| value_label(cap, a)).collect();
-    format!("{}.{}({})", obj_label(cap, call.this), cap.str(call.method), args.join(", "))
+    format!(
+        "{}.{}({})",
+        obj_label(cap, call.this),
+        cap.str(call.method),
+        args.join(", ")
+    )
 }

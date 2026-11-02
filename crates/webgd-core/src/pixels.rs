@@ -73,7 +73,10 @@ impl PixelFormat {
     /// 8-bit formats whose texel values are shown as-is.
     pub fn is_passthrough(self) -> bool {
         use PixelFormat::*;
-        matches!(self, Rgba8Unorm | Rgba8Srgb | Bgra8Unorm | Bgra8Srgb | R8Unorm | Rg8Unorm)
+        matches!(
+            self,
+            Rgba8Unorm | Rgba8Srgb | Bgra8Unorm | Bgra8Srgb | R8Unorm | Rg8Unorm
+        )
     }
 
     fn missing_alpha(self) -> f64 {
@@ -116,7 +119,9 @@ impl Image {
             return [0.0; 4];
         }
         let off = (y as usize * self.width as usize + x as usize) * bpt;
-        let Some(p) = self.data.get(off..off + bpt) else { return [0.0; 4] };
+        let Some(p) = self.data.get(off..off + bpt) else {
+            return [0.0; 4];
+        };
         let u16_at = |i: usize| u16::from_le_bytes([p[i], p[i + 1]]);
         let u32_at = |i: usize| u32::from_le_bytes([p[i], p[i + 1], p[i + 2], p[i + 3]]);
         let f32_at = |i: usize| f32::from_le_bytes([p[i], p[i + 1], p[i + 2], p[i + 3]]) as f64;
@@ -141,7 +146,12 @@ impl Image {
             Rgba32Sint => std::array::from_fn(|c| u32_at(c * 4) as i32 as f64),
             Rg11b10Ufloat => {
                 let v = u32_at(0);
-                [ufloat(v & 0x7ff, 6), ufloat((v >> 11) & 0x7ff, 6), ufloat(v >> 22, 5), a1]
+                [
+                    ufloat(v & 0x7ff, 6),
+                    ufloat((v >> 11) & 0x7ff, 6),
+                    ufloat(v >> 22, 5),
+                    a1,
+                ]
             }
             Rgb10a2Unorm => {
                 let v = u32_at(0);
@@ -169,11 +179,25 @@ impl Image {
             if pass {
                 return v.clamp(0.0, 255.0) as u8;
             }
-            let t = if span > 0.0 { (v - lo) / span } else if v >= lo { 1.0 } else { 0.0 };
-            if t.is_nan() { 0 } else { (t.clamp(0.0, 1.0) * 255.0).round() as u8 }
+            let t = if span > 0.0 {
+                (v - lo) / span
+            } else if v >= lo {
+                1.0
+            } else {
+                0.0
+            };
+            if t.is_nan() {
+                0
+            } else {
+                (t.clamp(0.0, 1.0) * 255.0).round() as u8
+            }
         };
         let map_alpha = |v: f64| -> u8 {
-            if pass || int_alpha { map(v) } else { (v.clamp(0.0, 1.0) * 255.0).round() as u8 }
+            if pass || int_alpha {
+                map(v)
+            } else {
+                (v.clamp(0.0, 1.0) * 255.0).round() as u8
+            }
         };
         let single = (channels.iter().filter(|&&c| c).count() == 1)
             .then(|| channels.iter().position(|&c| c).unwrap());

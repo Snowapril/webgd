@@ -34,7 +34,11 @@ pub enum AnalysisError {
 
 /// Static stats for a WGSL entry point. `entry = None` picks the single entry
 /// point of `stage` ([`AnalysisError::AmbiguousEntry`] if there are several).
-pub fn wgsl_stats(src: &str, entry: Option<&str>, stage: Stage) -> Result<StageStats, AnalysisError> {
+pub fn wgsl_stats(
+    src: &str,
+    entry: Option<&str>,
+    stage: Stage,
+) -> Result<StageStats, AnalysisError> {
     wgsl::stats(src, entry, stage)
 }
 

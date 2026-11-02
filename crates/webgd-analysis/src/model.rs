@@ -38,15 +38,25 @@ pub struct Cost {
 }
 
 impl Cost {
-    pub const ZERO: Cost = Cost { alu: 0.0, branches: 0.0, tex: 0.0 };
+    pub const ZERO: Cost = Cost {
+        alu: 0.0,
+        branches: 0.0,
+        tex: 0.0,
+    };
 
     pub fn alu(n: f64) -> Cost {
-        Cost { alu: n, ..Cost::ZERO }
+        Cost {
+            alu: n,
+            ..Cost::ZERO
+        }
     }
 
     /// One texture sample/load.
     pub fn sample() -> Cost {
-        Cost { tex: 1.0, ..Cost::ZERO }
+        Cost {
+            tex: 1.0,
+            ..Cost::ZERO
+        }
     }
 
     pub fn add(&mut self, o: Cost) {
@@ -57,11 +67,19 @@ impl Cost {
 
     /// Component-wise maximum (the more expensive side of a branch).
     pub fn max(self, o: Cost) -> Cost {
-        Cost { alu: self.alu.max(o.alu), branches: self.branches.max(o.branches), tex: self.tex.max(o.tex) }
+        Cost {
+            alu: self.alu.max(o.alu),
+            branches: self.branches.max(o.branches),
+            tex: self.tex.max(o.tex),
+        }
     }
 
     pub fn scale(self, k: f64) -> Cost {
-        Cost { alu: self.alu * k, branches: self.branches * k, tex: self.tex * k }
+        Cost {
+            alu: self.alu * k,
+            branches: self.branches * k,
+            tex: self.tex * k,
+        }
     }
 }
 
@@ -125,8 +143,9 @@ pub fn builtin_cost(name: &str, w: u32) -> f64 {
         "cross" => 6.0,
         "length" | "distance" => w + 4.0,
         "normalize" => 3.0 * w + 4.0,
-        "sqrt" | "inversesqrt" | "exp" | "exp2" | "log" | "log2" | "pow" | "sin" | "cos" | "tan" | "asin"
-        | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh" | "asinh" | "acosh" | "atanh" => 4.0 * w,
+        "sqrt" | "inversesqrt" | "exp" | "exp2" | "log" | "log2" | "pow" | "sin" | "cos"
+        | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh" | "asinh"
+        | "acosh" | "atanh" => 4.0 * w,
         "fma" => w,
         "mix" => 3.0 * w,
         "clamp" => 2.0 * w,

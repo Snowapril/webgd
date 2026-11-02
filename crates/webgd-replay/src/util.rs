@@ -14,15 +14,22 @@ pub fn num_list(cap: &Capture, v: &Value) -> Vec<f64> {
             b.chunks_exact(es)
                 .map(|c| match kind {
                     TypedKind::Int8 => c[0] as i8 as f64,
-                    TypedKind::Uint8 | TypedKind::Uint8Clamped | TypedKind::ArrayBuffer | TypedKind::DataView => c[0] as f64,
+                    TypedKind::Uint8
+                    | TypedKind::Uint8Clamped
+                    | TypedKind::ArrayBuffer
+                    | TypedKind::DataView => c[0] as f64,
                     TypedKind::Int16 => i16::from_le_bytes([c[0], c[1]]) as f64,
                     TypedKind::Uint16 => u16::from_le_bytes([c[0], c[1]]) as f64,
                     TypedKind::Int32 => i32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64,
                     TypedKind::Uint32 => u32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64,
                     TypedKind::Float32 => f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64,
                     TypedKind::Float64 => f64::from_le_bytes(c.try_into().unwrap_or([0; 8])),
-                    TypedKind::BigInt64 => i64::from_le_bytes(c.try_into().unwrap_or([0; 8])) as f64,
-                    TypedKind::BigUint64 => u64::from_le_bytes(c.try_into().unwrap_or([0; 8])) as f64,
+                    TypedKind::BigInt64 => {
+                        i64::from_le_bytes(c.try_into().unwrap_or([0; 8])) as f64
+                    }
+                    TypedKind::BigUint64 => {
+                        u64::from_le_bytes(c.try_into().unwrap_or([0; 8])) as f64
+                    }
                     TypedKind::Float16 => f16_to_f64(u16::from_le_bytes([c[0], c[1]])),
                 })
                 .collect()
@@ -94,15 +101,31 @@ pub fn value_tree(cap: &Capture, name: &str, v: &Value) -> StateNode {
     match v {
         Value::Dict(entries) => StateNode::Group {
             name: name.to_string(),
-            children: entries.iter().map(|(k, x)| value_tree(cap, cap.str(*k), x)).collect(),
+            children: entries
+                .iter()
+                .map(|(k, x)| value_tree(cap, cap.str(*k), x))
+                .collect(),
         },
         Value::Array(items) => StateNode::Group {
             name: name.to_string(),
-            children: items.iter().enumerate().map(|(i, x)| value_tree(cap, &format!("[{i}]"), x)).collect(),
+            children: items
+                .iter()
+                .enumerate()
+                .map(|(i, x)| value_tree(cap, &format!("[{i}]"), x))
+                .collect(),
         },
-        Value::String(s) => StateNode::Leaf { name: name.to_string(), value: cap.str(*s).to_string() },
-        Value::ObjRef(id) => StateNode::Leaf { name: name.to_string(), value: obj_label(cap, *id) },
-        _ => StateNode::Leaf { name: name.to_string(), value: value_label(cap, v) },
+        Value::String(s) => StateNode::Leaf {
+            name: name.to_string(),
+            value: cap.str(*s).to_string(),
+        },
+        Value::ObjRef(id) => StateNode::Leaf {
+            name: name.to_string(),
+            value: obj_label(cap, *id),
+        },
+        _ => StateNode::Leaf {
+            name: name.to_string(),
+            value: value_label(cap, v),
+        },
     }
 }
 

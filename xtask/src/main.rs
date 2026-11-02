@@ -4,7 +4,10 @@ use std::process::{Command, exit};
 const WASM_BINDGEN_VERSION: &str = "0.2.130";
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn run(cmd: &mut Command) {
@@ -30,7 +33,13 @@ fn build(release: bool) {
         exit(1);
     }
     let mut cargo = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cargo.current_dir(&root).args(["build", "-p", "webgd-ui", "--target", "wasm32-unknown-unknown"]);
+    cargo.current_dir(&root).args([
+        "build",
+        "-p",
+        "webgd-ui",
+        "--target",
+        "wasm32-unknown-unknown",
+    ]);
     if release {
         cargo.arg("--release");
     }
@@ -40,8 +49,18 @@ fn build(release: bool) {
     std::fs::create_dir_all(&out).unwrap();
     run(Command::new("wasm-bindgen")
         .current_dir(&root)
-        .arg(format!("target/wasm32-unknown-unknown/{profile}/webgd_ui.wasm"))
-        .args(["--target", "web", "--no-typescript", "--out-dir", "extension/ui", "--out-name", "webgd_ui"]));
+        .arg(format!(
+            "target/wasm32-unknown-unknown/{profile}/webgd_ui.wasm"
+        ))
+        .args([
+            "--target",
+            "web",
+            "--no-typescript",
+            "--out-dir",
+            "extension/ui",
+            "--out-name",
+            "webgd_ui",
+        ]));
     for f in ["index.html", "main.js"] {
         std::fs::copy(root.join("web").join(f), out.join(f)).unwrap();
     }

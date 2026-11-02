@@ -24,7 +24,13 @@ fn decodes_fixture() {
     let bd = &cap.frame[0];
     assert_eq!(cap.str(bd.method), "bufferData");
     assert_eq!(bd.args[0], Value::Number(34962.0));
-    let Value::Typed { kind: TypedKind::Float32, blob } = bd.args[1] else { panic!("{:?}", bd.args[1]) };
+    let Value::Typed {
+        kind: TypedKind::Float32,
+        blob,
+    } = bd.args[1]
+    else {
+        panic!("{:?}", bd.args[1])
+    };
     assert_eq!(cap.blob(blob), &[0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64]);
     assert_eq!(bd.result, Value::Undefined);
 
@@ -33,12 +39,18 @@ fn decodes_fixture() {
     let a = cap.dict_get(&mk.args[1], "a").unwrap();
     assert_eq!(a, &Value::Array(vec![Value::Bool(true), Value::Null]));
 
-    assert_eq!(call_label(&cap, create), "WebGL2RenderingContext#1.createBuffer()");
+    assert_eq!(
+        call_label(&cap, create),
+        "WebGL2RenderingContext#1.createBuffer()"
+    );
     assert_eq!(
         call_label(&cap, bd),
         "WebGL2RenderingContext#1.bufferData(34962, Float32Array[3], 35044)"
     );
-    assert_eq!(call_label(&cap, mk), "WebGL2RenderingContext#1.webgd:pushMarker(\"pass\", {…})");
+    assert_eq!(
+        call_label(&cap, mk),
+        "WebGL2RenderingContext#1.webgd:pushMarker(\"pass\", {…})"
+    );
 }
 
 #[test]
@@ -60,5 +72,8 @@ fn rejects_bad_header_and_dangling_refs() {
     // Header + call referencing undefined string 7.
     let mut b = b"WGDW\x01\0\0\0\0\0\0\0".to_vec();
     b.extend_from_slice(&[0x04, 2, 0, 0, 0, 0, 7, 0, 0, 0]);
-    assert!(matches!(decode(&b), Err(WireError::DanglingRef { offset: 18 })));
+    assert!(matches!(
+        decode(&b),
+        Err(WireError::DanglingRef { offset: 18 })
+    ));
 }

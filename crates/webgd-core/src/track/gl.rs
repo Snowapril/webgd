@@ -48,7 +48,16 @@ impl Tracker {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn define(&mut self, bt: u32, face: u32, level: u32, ifmt: u32, size: (u32, u32, u32), fmt_ty: Option<(u32, u32)>, immutable: bool) {
+    fn define(
+        &mut self,
+        bt: u32,
+        face: u32,
+        level: u32,
+        ifmt: u32,
+        size: (u32, u32, u32),
+        fmt_ty: Option<(u32, u32)>,
+        immutable: bool,
+    ) {
         let d = self.dims.get_or_insert_with(|| TexDims {
             target: bt,
             internalformat: ifmt,
@@ -88,45 +97,72 @@ impl Tracker {
                     None => self.bound.remove(&(ctx, unit, t)),
                 };
             }
-            m @ ("texImage2D" | "texImage3D" | "copyTexImage2D" | "compressedTexImage2D"
-            | "compressedTexImage3D" | "texStorage2D" | "texStorage3D") => {
+            m @ ("texImage2D"
+            | "texImage3D"
+            | "copyTexImage2D"
+            | "compressedTexImage2D"
+            | "compressedTexImage3D"
+            | "texStorage2D"
+            | "texStorage3D") => {
                 let Some(target) = n(0) else { return };
-                let Some((tex, bt, face)) = self.bound_tex(ctx, target) else { return };
+                let Some((tex, bt, face)) = self.bound_tex(ctx, target) else {
+                    return;
+                };
                 if tex != id {
                     return;
                 }
-                let (Some(l), Some(ifmt)) = (n(1), n(2)) else { return };
+                let (Some(l), Some(ifmt)) = (n(1), n(2)) else {
+                    return;
+                };
                 match m {
                     "texImage2D" if a.len() == 6 => {
                         // (target, level, internalformat, format, type, source)
-                        let Some(Value::Image { width, height, .. }) = a.get(5) else { return };
+                        let Some(Value::Image { width, height, .. }) = a.get(5) else {
+                            return;
+                        };
                         let ft = n(3).zip(n(4));
                         self.define(bt, face, l, ifmt, (*width, *height, 1), ft, false);
                     }
                     "texImage2D" => {
-                        let (Some(w), Some(h)) = (n(3), n(4)) else { return };
+                        let (Some(w), Some(h)) = (n(3), n(4)) else {
+                            return;
+                        };
                         self.define(bt, face, l, ifmt, (w, h, 1), n(6).zip(n(7)), false);
                     }
                     "texImage3D" => {
-                        let (Some(w), Some(h), Some(d)) = (n(3), n(4), n(5)) else { return };
+                        let (Some(w), Some(h), Some(d)) = (n(3), n(4), n(5)) else {
+                            return;
+                        };
                         self.define(bt, face, l, ifmt, (w, h, d), n(7).zip(n(8)), false);
                     }
                     "copyTexImage2D" => {
-                        let (Some(w), Some(h)) = (n(5), n(6)) else { return };
+                        let (Some(w), Some(h)) = (n(5), n(6)) else {
+                            return;
+                        };
                         self.define(bt, face, l, ifmt, (w, h, 1), None, false);
                     }
                     "compressedTexImage2D" => {
-                        let (Some(w), Some(h)) = (n(3), n(4)) else { return };
+                        let (Some(w), Some(h)) = (n(3), n(4)) else {
+                            return;
+                        };
                         self.define(bt, face, l, ifmt, (w, h, 1), None, false);
                     }
                     "compressedTexImage3D" => {
-                        let (Some(w), Some(h), Some(d)) = (n(3), n(4), n(5)) else { return };
+                        let (Some(w), Some(h), Some(d)) = (n(3), n(4), n(5)) else {
+                            return;
+                        };
                         self.define(bt, face, l, ifmt, (w, h, d), None, false);
                     }
                     _ => {
                         // texStorage2D(target, levels, ifmt, w, h) / texStorage3D(..., d)
-                        let (Some(w), Some(h)) = (n(3), n(4)) else { return };
-                        let d = if m == "texStorage3D" { n(5).unwrap_or(1) } else { 1 };
+                        let (Some(w), Some(h)) = (n(3), n(4)) else {
+                            return;
+                        };
+                        let d = if m == "texStorage3D" {
+                            n(5).unwrap_or(1)
+                        } else {
+                            1
+                        };
                         if let Some(old) = &mut self.dims {
                             old.levels.clear();
                         }
@@ -147,11 +183,17 @@ impl Tracker {
             }
             "generateMipmap" => {
                 let Some(target) = n(0) else { return };
-                let Some((tex, bt, _)) = self.bound_tex(ctx, target) else { return };
-                let Some(d) = self.dims.as_mut().filter(|_| tex == id) else { return };
+                let Some((tex, bt, _)) = self.bound_tex(ctx, target) else {
+                    return;
+                };
+                let Some(d) = self.dims.as_mut().filter(|_| tex == id) else {
+                    return;
+                };
                 let faces = if bt == TEXTURE_CUBE_MAP { 6 } else { 1 };
                 for f in 0..faces {
-                    let Some(&(mut w, mut h, mut z)) = d.levels.get(&(0, f)) else { continue };
+                    let Some(&(mut w, mut h, mut z)) = d.levels.get(&(0, f)) else {
+                        continue;
+                    };
                     let mut level = 0;
                     while w > 1 || h > 1 || (bt == TEXTURE_3D && z > 1) {
                         level += 1;
@@ -171,11 +213,21 @@ impl Tracker {
     /// Frame-start bindings from a `webgd:glState` snapshot record.
     fn load_state(&mut self, cap: &Capture, ctx: ObjId, state: &Value) {
         self.bound.retain(|k, _| k.0 != ctx);
-        let active = cap.dict_get(state, ACTIVE_TEXTURE).and_then(Value::as_f64).map_or(0, |e| (e as u32).wrapping_sub(TEXTURE0));
+        let active = cap
+            .dict_get(state, ACTIVE_TEXTURE)
+            .and_then(Value::as_f64)
+            .map_or(0, |e| (e as u32).wrapping_sub(TEXTURE0));
         self.active.insert(ctx, active);
-        let Some(units) = cap.dict_get(state, "units").and_then(Value::as_array) else { return };
+        let Some(units) = cap.dict_get(state, "units").and_then(Value::as_array) else {
+            return;
+        };
         for (u, unit) in units.iter().enumerate() {
-            for (key, target) in [("2d", TEXTURE_2D), ("cube", TEXTURE_CUBE_MAP), ("3d", TEXTURE_3D), ("array", TEXTURE_2D_ARRAY)] {
+            for (key, target) in [
+                ("2d", TEXTURE_2D),
+                ("cube", TEXTURE_CUBE_MAP),
+                ("3d", TEXTURE_3D),
+                ("array", TEXTURE_2D_ARRAY),
+            ] {
                 if let Some(tex) = cap.dict_get(unit, key).and_then(Value::as_obj) {
                     self.bound.insert((ctx, u as u32, target), tex);
                 }
@@ -186,19 +238,39 @@ impl Tracker {
 
 /// Dims from a snapshot `webgd:glTexture` Dict.
 pub fn snapshot_dims(cap: &Capture, desc: &Value) -> Option<TexDims> {
-    let num = |k: &str| cap.dict_get(desc, k).and_then(Value::as_f64).map(|v| v as u32);
+    let num = |k: &str| {
+        cap.dict_get(desc, k)
+            .and_then(Value::as_f64)
+            .map(|v| v as u32)
+    };
     let mut levels = BTreeMap::new();
-    for lv in cap.dict_get(desc, "levels").and_then(Value::as_array).unwrap_or(&[]) {
-        let ln = |k: &str| cap.dict_get(lv, k).and_then(Value::as_f64).map(|v| v as u32);
-        let (Some(level), Some(w), Some(h)) = (ln("level"), ln("width"), ln("height")) else { continue };
-        levels.insert((level, ln("face").unwrap_or(0)), (w, h, ln("depth").unwrap_or(1)));
+    for lv in cap
+        .dict_get(desc, "levels")
+        .and_then(Value::as_array)
+        .unwrap_or(&[])
+    {
+        let ln = |k: &str| {
+            cap.dict_get(lv, k)
+                .and_then(Value::as_f64)
+                .map(|v| v as u32)
+        };
+        let (Some(level), Some(w), Some(h)) = (ln("level"), ln("width"), ln("height")) else {
+            continue;
+        };
+        levels.insert(
+            (level, ln("face").unwrap_or(0)),
+            (w, h, ln("depth").unwrap_or(1)),
+        );
     }
     Some(TexDims {
         target: num("target")?,
         internalformat: num("internalformat").unwrap_or(0),
         format: num("format"),
         ty: num("type"),
-        immutable: cap.dict_get(desc, "immutable").and_then(Value::as_f64).is_some_and(|v| v != 0.0),
+        immutable: cap
+            .dict_get(desc, "immutable")
+            .and_then(Value::as_f64)
+            .is_some_and(|v| v != 0.0),
         levels,
     })
 }

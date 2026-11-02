@@ -2,8 +2,8 @@
 use std::collections::HashMap;
 
 use naga::{
-    BinaryOperator, Block, Expression, Function, Handle, MathFunction, Module, ShaderStage, Statement, Type,
-    TypeInner, UniqueArena,
+    BinaryOperator, Block, Expression, Function, Handle, MathFunction, Module, ShaderStage,
+    Statement, Type, TypeInner, UniqueArena,
     proc::Layouter,
     valid::{Capabilities, FunctionInfo, ModuleInfo, ValidationFlags, Validator},
 };
@@ -12,7 +12,8 @@ use crate::model::{self, Cost};
 use crate::{AnalysisError, Stage, StageStats};
 
 pub fn stats(src: &str, entry: Option<&str>, stage: Stage) -> Result<StageStats, AnalysisError> {
-    let module = naga::front::wgsl::parse_str(src).map_err(|e| AnalysisError::Parse(e.emit_to_string(src)))?;
+    let module = naga::front::wgsl::parse_str(src)
+        .map_err(|e| AnalysisError::Parse(e.emit_to_string(src)))?;
     let info = Validator::new(ValidationFlags::all(), Capabilities::all())
         .validate(&module)
         .map_err(|e| AnalysisError::Validate(e.emit_to_string(src)))?;
@@ -32,17 +33,32 @@ pub fn stats(src: &str, entry: Option<&str>, stage: Stage) -> Result<StageStats,
         return Err(AnalysisError::AmbiguousEntry);
     }
 
-    let mut walker = Walker { module: &module, info: &info, memo: HashMap::new(), local_components: 0 };
+    let mut walker = Walker {
+        module: &module,
+        info: &info,
+        memo: HashMap::new(),
+        local_components: 0,
+    };
     let cost = walker.function(&ep.function, info.get_entry_point(ep_index));
 
     let types = &module.types;
-    let io: u32 = ep.function.arguments.iter().map(|a| components(types, a.ty)).sum::<u32>()
-        + ep.function.result.as_ref().map_or(0, |r| components(types, r.ty));
+    let io: u32 = ep
+        .function
+        .arguments
+        .iter()
+        .map(|a| components(types, a.ty))
+        .sum::<u32>()
+        + ep.function
+            .result
+            .as_ref()
+            .map_or(0, |r| components(types, r.ty));
     let entry_locals = locals_components(types, &ep.function);
 
     let (workgroup_size, workgroup_bytes) = if want == ShaderStage::Compute {
         let mut layouter = Layouter::default();
-        layouter.update(module.to_ctx()).map_err(|e| AnalysisError::Validate(e.to_string()))?;
+        layouter
+            .update(module.to_ctx())
+            .map_err(|e| AnalysisError::Validate(e.to_string()))?;
         let bytes = module
             .global_variables
             .iter()
@@ -112,10 +128,17 @@ impl Walker<'_> {
                 model::if_cost(self.block(accept, f, fi), self.block(reject, f, fi))
             }
             Statement::Switch { cases, .. } => {
-                let costs: Vec<Cost> = cases.iter().map(|case| self.block(&case.body, f, fi)).collect();
+                let costs: Vec<Cost> = cases
+                    .iter()
+                    .map(|case| self.block(&case.body, f, fi))
+                    .collect();
                 model::switch_cost(costs)
             }
-            Statement::Loop { body, continuing, break_if } => {
+            Statement::Loop {
+                body,
+                continuing,
+                break_if,
+            } => {
                 let mut it = self.block(body, f, fi);
                 it.add(self.block(continuing, f, fi));
                 if break_if.is_some() {
@@ -137,13 +160,23 @@ impl Walker<'_> {
             Expression::Unary { .. } => Cost::alu(model::unary_cost(w(h))),
             Expression::Binary { op, left, right } => {
                 let n = match (op, ty(*left), ty(*right)) {
-                    (BinaryOperator::Multiply, TypeInner::Matrix { columns, rows, .. }, TypeInner::Vector { .. })
-                    | (BinaryOperator::Multiply, TypeInner::Vector { .. }, TypeInner::Matrix { columns, rows, .. }) => {
-                        model::mat_vec_cost(*rows as u32, *columns as u32)
-                    }
                     (
                         BinaryOperator::Multiply,
-                        TypeInner::Matrix { columns: k, rows: r, .. },
+                        TypeInner::Matrix { columns, rows, .. },
+                        TypeInner::Vector { .. },
+                    )
+                    | (
+                        BinaryOperator::Multiply,
+                        TypeInner::Vector { .. },
+                        TypeInner::Matrix { columns, rows, .. },
+                    ) => model::mat_vec_cost(*rows as u32, *columns as u32),
+                    (
+                        BinaryOperator::Multiply,
+                        TypeInner::Matrix {
+                            columns: k,
+                            rows: r,
+                            ..
+                        },
                         TypeInner::Matrix { columns: c, .. },
                     ) => model::mat_mat_cost(*r as u32, *c as u32, *k as u32),
                     _ => model::binary_cost(w(h)),
@@ -233,5 +266,8 @@ fn components(types: &UniqueArena<Type>, ty: Handle<Type>) -> u32 {
 }
 
 fn locals_components(types: &UniqueArena<Type>, f: &Function) -> u32 {
-    f.local_variables.iter().map(|(_, v)| components(types, v.ty)).sum()
+    f.local_variables
+        .iter()
+        .map(|(_, v)| components(types, v.ty))
+        .sum()
 }

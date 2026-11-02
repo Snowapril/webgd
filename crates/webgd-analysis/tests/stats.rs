@@ -81,16 +81,29 @@ fn wgsl_matrix_and_calls() {
 fn wgsl_entry_selection() {
     let src = "@fragment fn a() -> @location(0) vec4f { return vec4f(1); }
         @fragment fn b() -> @location(0) vec4f { return vec4f(sin(1.5)); }";
-    assert_eq!(wgsl_stats(src, None, Stage::Fragment), Err(AnalysisError::AmbiguousEntry));
-    assert_eq!(wgsl_stats(src, None, Stage::Vertex), Err(AnalysisError::NoEntry));
-    assert_eq!(wgsl_stats(src, Some("c"), Stage::Fragment), Err(AnalysisError::NoEntry));
+    assert_eq!(
+        wgsl_stats(src, None, Stage::Fragment),
+        Err(AnalysisError::AmbiguousEntry)
+    );
+    assert_eq!(
+        wgsl_stats(src, None, Stage::Vertex),
+        Err(AnalysisError::NoEntry)
+    );
+    assert_eq!(
+        wgsl_stats(src, Some("c"), Stage::Fragment),
+        Err(AnalysisError::NoEntry)
+    );
     assert!(wgsl_stats(src, Some("b"), Stage::Fragment).is_ok());
-    assert!(matches!(wgsl_stats("fn (", None, Stage::Fragment), Err(AnalysisError::Parse(_))));
+    assert!(matches!(
+        wgsl_stats("fn (", None, Stage::Fragment),
+        Err(AnalysisError::Parse(_))
+    ));
 }
 
 // ---- GLSL ES 3.00 ----
 
-const FS_HEAD: &str = "#version 300 es\nprecision mediump float;\nin float x;\nin vec2 uv;\nout vec4 o;\n";
+const FS_HEAD: &str =
+    "#version 300 es\nprecision mediump float;\nin float x;\nin vec2 uv;\nout vec4 o;\n";
 
 fn fs(body: &str) -> String {
     format!("{FS_HEAD}{body}")
@@ -98,7 +111,11 @@ fn fs(body: &str) -> String {
 
 #[test]
 fn glsl_sin_alu() {
-    let s = glsl_stats(&fs("void main() { o = vec4(sin(x), 0.0, 0.0, 1.0); }"), Stage::Fragment).unwrap();
+    let s = glsl_stats(
+        &fs("void main() { o = vec4(sin(x), 0.0, 0.0, 1.0); }"),
+        Stage::Fragment,
+    )
+    .unwrap();
     assert_eq!(s.alu, 4.0);
     assert_eq!(s.branches, 0.0);
     assert_eq!(s.tex_samples, 0.0);
@@ -106,7 +123,8 @@ fn glsl_sin_alu() {
 
 #[test]
 fn glsl_loop() {
-    let src = fs("void main() { float a = x; for (int i = 0; i < 4; i++) { a += 1.0; } o = vec4(a); }");
+    let src =
+        fs("void main() { float a = x; for (int i = 0; i < 4; i++) { a += 1.0; } o = vec4(a); }");
     let s = glsl_stats(&src, Stage::Fragment).unwrap();
     assert!(s.alu >= 8.0, "{s:?}");
     assert!(s.branches >= 8.0, "{s:?}");
@@ -151,13 +169,22 @@ fn glsl_matrix_ubo_and_calls() {
 
 #[test]
 fn glsl_parse_error() {
-    assert!(matches!(glsl_stats("void main( {", Stage::Fragment), Err(AnalysisError::Parse(_))));
-    assert_eq!(glsl_stats("void f() {}", Stage::Fragment), Err(AnalysisError::NoEntry));
+    assert!(matches!(
+        glsl_stats("void main( {", Stage::Fragment),
+        Err(AnalysisError::Parse(_))
+    ));
+    assert_eq!(
+        glsl_stats("void f() {}", Stage::Fragment),
+        Err(AnalysisError::NoEntry)
+    );
 }
 
 #[test]
 fn occupancy_register_bound() {
-    let s = webgd_analysis::StageStats { est_regs_vec4: 16, ..Default::default() };
+    let s = webgd_analysis::StageStats {
+        est_regs_vec4: 16,
+        ..Default::default()
+    };
     // floor(512 / 64) = 8 waves of 16.
     assert_eq!(occupancy(&s), 0.5);
 }

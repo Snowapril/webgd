@@ -1,7 +1,7 @@
 //! Untyped JS access helpers. All WebGL2/WebGPU access in this crate goes through these.
 use js_sys::{Array, Function, Object, Promise, Reflect};
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 pub fn global() -> JsValue {
@@ -36,7 +36,8 @@ pub fn construct(name: &str, args: &[JsValue]) -> Result<JsValue, JsValue> {
         .dyn_into()
         .map_err(|_| JsValue::from_str(&format!("{name} is not a constructor")))?;
     let arr: Array = args.iter().collect();
-    Reflect::construct(&ctor, &arr)}
+    Reflect::construct(&ctor, &arr)
+}
 
 pub fn obj(entries: &[(&str, JsValue)]) -> JsValue {
     let o = Object::new();

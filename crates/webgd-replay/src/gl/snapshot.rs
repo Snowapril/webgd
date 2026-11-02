@@ -54,7 +54,13 @@ pub fn apply(
     notes: &mut HashMap<ObjId, Vec<String>>,
     errs: &mut Vec<String>,
 ) {
-    let mut x = Ctx { gl, cap, objs, notes, errs };
+    let mut x = Ctx {
+        gl,
+        cap,
+        objs,
+        notes,
+        errs,
+    };
     let of = |m: &'static str| calls.iter().copied().filter(move |c| cap.method(c) == m);
 
     // Neutral transfer state for restores.
@@ -70,7 +76,10 @@ pub fn apply(
     let mut tex_targets: HashMap<ObjId, u32> = HashMap::new();
     for c in of("webgd:glTexture") {
         if let Some(id) = arg(c, 0).as_obj() {
-            tex_targets.insert(id, get_num(cap, arg(c, 1), "target").unwrap_or(TEXTURE_2D as f64) as u32);
+            tex_targets.insert(
+                id,
+                get_num(cap, arg(c, 1), "target").unwrap_or(TEXTURE_2D as f64) as u32,
+            );
         }
         texture(&mut x, c);
     }
@@ -87,8 +96,14 @@ pub fn apply(
         let s = x.js(arg(c, 0));
         if let Value::Dict(entries) = arg(c, 1) {
             for (k, v) in entries {
-                let Ok(p) = cap.str(*k).parse::<u32>() else { continue };
-                let m = if matches!(p, TEXTURE_MIN_LOD | TEXTURE_MAX_LOD) { "samplerParameterf" } else { "samplerParameteri" };
+                let Ok(p) = cap.str(*k).parse::<u32>() else {
+                    continue;
+                };
+                let m = if matches!(p, TEXTURE_MIN_LOD | TEXTURE_MAX_LOD) {
+                    "samplerParameterf"
+                } else {
+                    "samplerParameteri"
+                };
                 let v = x.js(v);
                 x.call(m, &[s.clone(), n(p), v]);
             }
@@ -102,7 +117,10 @@ pub fn apply(
     }
     for c in of("webgd:glDefaultFramebuffer") {
         let d = arg(c, 0);
-        let (w, h) = (get_num(cap, d, "width").unwrap_or(0.0) as u32, get_num(cap, d, "height").unwrap_or(0.0) as u32);
+        let (w, h) = (
+            get_num(cap, d, "width").unwrap_or(0.0) as u32,
+            get_num(cap, d, "height").unwrap_or(0.0) as u32,
+        );
         match cap.dict_get(d, "data") {
             Some(v @ Value::Typed { .. }) if w > 0 && h > 0 => {
                 let data = x.js(v);
@@ -127,7 +145,10 @@ fn texture(x: &mut Ctx, c: &Call) {
     let ifmt = get_num(cap, d, "internalformat").unwrap_or(0.0) as u32;
     let immutable = get_num(cap, d, "immutable").unwrap_or(0.0) != 0.0;
     let imm_levels = get_num(cap, d, "immutableLevels").unwrap_or(0.0) as u32;
-    let levels: &[Value] = cap.dict_get(d, "levels").and_then(Value::as_array).unwrap_or(&[]);
+    let levels: &[Value] = cap
+        .dict_get(d, "levels")
+        .and_then(Value::as_array)
+        .unwrap_or(&[]);
     let gl = x.gl;
     gl.c("activeTexture", &[(TEXTURE0 + gl.scratch_unit) as f64]);
     gl.bind_tex(target, &tex);
@@ -150,12 +171,23 @@ fn texture(x: &mut Ctx, c: &Call) {
             )
         };
         if immutable {
-            let (lv, _, w, h, dp) = levels.iter().map(dims).min_by_key(|t| t.0).unwrap_or((0, 0, 1, 1, 1));
+            let (lv, _, w, h, dp) = levels
+                .iter()
+                .map(dims)
+                .min_by_key(|t| t.0)
+                .unwrap_or((0, 0, 1, 1, 1));
             let (w0, h0) = ((w << lv).max(1), (h << lv).max(1));
-            let d0 = if target == TEXTURE_3D { (dp << lv).max(1) } else { dp };
+            let d0 = if target == TEXTURE_3D {
+                (dp << lv).max(1)
+            } else {
+                dp
+            };
             let nl = imm_levels.max(1);
             if three_d {
-                x.call("texStorage3D", &[n(target), n(nl), n(ifmt), n(w0), n(h0), n(d0)]);
+                x.call(
+                    "texStorage3D",
+                    &[n(target), n(nl), n(ifmt), n(w0), n(h0), n(d0)],
+                );
             } else {
                 x.call("texStorage2D", &[n(target), n(nl), n(ifmt), n(w0), n(h0)]);
             }
@@ -169,21 +201,56 @@ fn texture(x: &mut Ctx, c: &Call) {
                 if three_d {
                     x.call(
                         "texImage3D",
-                        &[n(target), n(lv), n(ifmt), n(w), n(h), n(dp), n(0), n(fmt), n(ty), JsValue::NULL],
+                        &[
+                            n(target),
+                            n(lv),
+                            n(ifmt),
+                            n(w),
+                            n(h),
+                            n(dp),
+                            n(0),
+                            n(fmt),
+                            n(ty),
+                            JsValue::NULL,
+                        ],
                     );
                 } else {
-                    let t = if target == TEXTURE_CUBE_MAP { TEXTURE_CUBE_MAP_POSITIVE_X + face } else { target };
-                    x.call("texImage2D", &[n(t), n(lv), n(ifmt), n(w), n(h), n(0), n(fmt), n(ty), JsValue::NULL]);
+                    let t = if target == TEXTURE_CUBE_MAP {
+                        TEXTURE_CUBE_MAP_POSITIVE_X + face
+                    } else {
+                        target
+                    };
+                    x.call(
+                        "texImage2D",
+                        &[
+                            n(t),
+                            n(lv),
+                            n(ifmt),
+                            n(w),
+                            n(h),
+                            n(0),
+                            n(fmt),
+                            n(ty),
+                            JsValue::NULL,
+                        ],
+                    );
                 }
             }
         } else {
-            x.errs.push(format!("texture {}: unknown format 0x{ifmt:X}", id.0));
+            x.errs
+                .push(format!("texture {}: unknown format 0x{ifmt:X}", id.0));
         }
     }
     if let Some(Value::Dict(params)) = cap.dict_get(d, "params") {
         for (k, v) in params {
-            let Ok(p) = cap.str(*k).parse::<u32>() else { continue };
-            let m = if matches!(p, TEXTURE_MIN_LOD | TEXTURE_MAX_LOD) { "texParameterf" } else { "texParameteri" };
+            let Ok(p) = cap.str(*k).parse::<u32>() else {
+                continue;
+            };
+            let m = if matches!(p, TEXTURE_MIN_LOD | TEXTURE_MAX_LOD) {
+                "texParameterf"
+            } else {
+                "texParameteri"
+            };
             let v = x.js(v);
             x.call(m, &[n(target), n(p), v]);
         }
@@ -194,16 +261,31 @@ fn texture(x: &mut Ctx, c: &Call) {
             continue;
         }
         if data.is_nullish() {
-            let why = if is_depth_stencil(ifmt) { "depth/stencil" } else { "not readable" };
+            let why = if is_depth_stencil(ifmt) {
+                "depth/stencil"
+            } else {
+                "not readable"
+            };
             x.note(id, format!("pre-frame contents not captured ({why})"));
             continue;
         }
-        let class = get_str(cap, l, "readClass").and_then(ReadClass::parse).unwrap_or(ReadClass::Unorm);
+        let class = get_str(cap, l, "readClass")
+            .and_then(ReadClass::parse)
+            .unwrap_or(ReadClass::Unorm);
         let g = |k: &str| get_num(cap, l, k).unwrap_or(0.0) as u32;
-        let att = Attach::Tex { tex: tex.clone(), target, level: g("level"), face: g("face"), layer: g("layer") };
+        let att = Attach::Tex {
+            tex: tex.clone(),
+            target,
+            level: g("level"),
+            face: g("face"),
+            layer: g("layer"),
+        };
         let data = x.js(data);
-        if let Err(e) = x.gl.blit_upload(class, g("width"), g("height"), &data, &att) {
-            x.errs.push(format!("texture {} level {}: {e}", id.0, g("level")));
+        if let Err(e) =
+            x.gl.blit_upload(class, g("width"), g("height"), &data, &att)
+        {
+            x.errs
+                .push(format!("texture {} level {}: {e}", id.0, g("level")));
             x.note(id, format!("pre-frame contents not restored ({e})"));
         }
     }
@@ -215,9 +297,14 @@ fn buffer(x: &mut Ctx, c: &Call) {
     let d = arg(c, 1);
     let usage = get_num(cap, d, "usage").unwrap_or(0x88E4 as f64);
     let is_index = get_num(cap, d, "isIndex").unwrap_or(0.0) != 0.0;
-    let target = if is_index { ELEMENT_ARRAY_BUFFER } else { ARRAY_BUFFER };
+    let target = if is_index {
+        ELEMENT_ARRAY_BUFFER
+    } else {
+        ARRAY_BUFFER
+    };
     if is_index {
-        let _ = x.gl.call("bindVertexArray", std::slice::from_ref(&x.gl.scratch_vao));
+        let _ =
+            x.gl.call("bindVertexArray", std::slice::from_ref(&x.gl.scratch_vao));
     }
     x.call("bindBuffer", &[n(target), buf]);
     let data = match cap.dict_get(d, "data") {
@@ -242,10 +329,15 @@ fn renderbuffer(x: &mut Ctx, c: &Call) {
         return;
     }
     x.call("bindRenderbuffer", &[n(RENDERBUFFER), rb.clone()]);
-    x.call("renderbufferStorageMultisample", &[n(RENDERBUFFER), n(samples), n(ifmt), n(w), n(h)]);
+    x.call(
+        "renderbufferStorageMultisample",
+        &[n(RENDERBUFFER), n(samples), n(ifmt), n(w), n(h)],
+    );
     match cap.dict_get(d, "data") {
         Some(v @ Value::Typed { .. }) => {
-            let class = get_str(cap, d, "readClass").and_then(ReadClass::parse).unwrap_or(ReadClass::Unorm);
+            let class = get_str(cap, d, "readClass")
+                .and_then(ReadClass::parse)
+                .unwrap_or(ReadClass::Unorm);
             let data = x.js(v);
             if let Err(e) = x.gl.blit_upload(class, w, h, &data, &Attach::Rb(rb)) {
                 x.errs.push(format!("renderbuffer {}: {e}", id.0));
@@ -271,10 +363,15 @@ fn framebuffer(x: &mut Ctx, c: &Call, tex_targets: &HashMap<ObjId, u32>) {
     let d = arg(c, 1);
     x.gl.bind_fb(FRAMEBUFFER, &fb);
     if let Some(Value::Dict(atts)) = cap.dict_get(d, "attachments") {
-        let keys: Vec<u32> = atts.iter().filter_map(|(k, _)| cap.str(*k).parse().ok()).collect();
+        let keys: Vec<u32> = atts
+            .iter()
+            .filter_map(|(k, _)| cap.str(*k).parse().ok())
+            .collect();
         let has_split_ds = keys.contains(&DEPTH_ATTACHMENT) || keys.contains(&STENCIL_ATTACHMENT);
         for (k, a) in atts {
-            let Ok(att) = cap.str(*k).parse::<u32>() else { continue };
+            let Ok(att) = cap.str(*k).parse::<u32>() else {
+                continue;
+            };
             if att == DEPTH_STENCIL_ATTACHMENT && has_split_ds {
                 continue;
             }
@@ -284,10 +381,23 @@ fn framebuffer(x: &mut Ctx, c: &Call, tex_targets: &HashMap<ObjId, u32>) {
             let g = |k: &str| get_num(cap, a, k).unwrap_or(0.0) as u32;
             let src = match ty {
                 TEXTURE => {
-                    let target = obj_v.as_obj().and_then(|id| tex_targets.get(&id).copied()).unwrap_or(TEXTURE_2D);
+                    let target = obj_v
+                        .as_obj()
+                        .and_then(|id| tex_targets.get(&id).copied())
+                        .unwrap_or(TEXTURE_2D);
                     let face = g("face");
-                    let face = if face >= TEXTURE_CUBE_MAP_POSITIVE_X { face - TEXTURE_CUBE_MAP_POSITIVE_X } else { face };
-                    Attach::Tex { tex: obj, target, level: g("level"), face, layer: g("layer") }
+                    let face = if face >= TEXTURE_CUBE_MAP_POSITIVE_X {
+                        face - TEXTURE_CUBE_MAP_POSITIVE_X
+                    } else {
+                        face
+                    };
+                    Attach::Tex {
+                        tex: obj,
+                        target,
+                        level: g("level"),
+                        face,
+                        layer: g("layer"),
+                    }
                 }
                 RENDERBUFFER => Attach::Rb(obj),
                 _ => continue,
@@ -312,7 +422,10 @@ fn vertex_array(x: &mut Ctx, c: &Call) {
     let vao = x.js(arg(c, 0));
     let d = arg(c, 1);
     x.call("bindVertexArray", &[vao]);
-    let attribs: &[Value] = cap.dict_get(d, "attribs").and_then(Value::as_array).unwrap_or(&[]);
+    let attribs: &[Value] = cap
+        .dict_get(d, "attribs")
+        .and_then(Value::as_array)
+        .unwrap_or(&[]);
     for (i, a) in attribs.iter().enumerate() {
         let g = |k: &str| get_num(cap, a, k).unwrap_or(0.0);
         let buf_v = cap.dict_get(a, "buffer").unwrap_or(&Value::Null);
@@ -321,15 +434,35 @@ fn vertex_array(x: &mut Ctx, c: &Call) {
             x.call("bindBuffer", &[n(ARRAY_BUFFER), buf]);
             let size = js::num(g("size").max(1.0));
             if g("integer") != 0.0 {
-                x.call("vertexAttribIPointer", &[n(i as u32), size, js::num(g("type")), js::num(g("stride")), js::num(g("offset"))]);
+                x.call(
+                    "vertexAttribIPointer",
+                    &[
+                        n(i as u32),
+                        size,
+                        js::num(g("type")),
+                        js::num(g("stride")),
+                        js::num(g("offset")),
+                    ],
+                );
             } else {
                 x.call(
                     "vertexAttribPointer",
-                    &[n(i as u32), size, js::num(g("type")), JsValue::from_bool(g("normalized") != 0.0), js::num(g("stride")), js::num(g("offset"))],
+                    &[
+                        n(i as u32),
+                        size,
+                        js::num(g("type")),
+                        JsValue::from_bool(g("normalized") != 0.0),
+                        js::num(g("stride")),
+                        js::num(g("offset")),
+                    ],
                 );
             }
         }
-        let m = if g("enabled") != 0.0 { "enableVertexAttribArray" } else { "disableVertexAttribArray" };
+        let m = if g("enabled") != 0.0 {
+            "enableVertexAttribArray"
+        } else {
+            "disableVertexAttribArray"
+        };
         x.call(m, &[n(i as u32)]);
         x.call("vertexAttribDivisor", &[n(i as u32), js::num(g("divisor"))]);
     }
@@ -345,23 +478,37 @@ fn program(x: &mut Ctx, c: &Call) {
     let p = x.js(arg(c, 0));
     x.call("useProgram", std::slice::from_ref(&p));
     for u in arg(c, 1).as_array().unwrap_or(&[]) {
-        let Some([Value::String(name), ty, value]) = u.as_array().and_then(|a| <&[Value; 3]>::try_from(a).ok()) else { continue };
-        let loc = x.gl.call("getUniformLocation", &[p.clone(), cap.str(*name).into()]).unwrap_or(JsValue::NULL);
+        let Some([Value::String(name), ty, value]) =
+            u.as_array().and_then(|a| <&[Value; 3]>::try_from(a).ok())
+        else {
+            continue;
+        };
+        let loc =
+            x.gl.call("getUniformLocation", &[p.clone(), cap.str(*name).into()])
+                .unwrap_or(JsValue::NULL);
         if loc.is_null() {
             continue;
         }
         let v = x.js(value);
-        if let Err(e) = super::uniforms::set_uniform(&x.gl.gl, ty.as_f64().unwrap_or(0.0) as u32, &loc, &v) {
-            x.errs.push(format!("uniform {}: {}", cap.str(*name), js::err_msg(&e)));
+        if let Err(e) =
+            super::uniforms::set_uniform(&x.gl.gl, ty.as_f64().unwrap_or(0.0) as u32, &loc, &v)
+        {
+            x.errs
+                .push(format!("uniform {}: {}", cap.str(*name), js::err_msg(&e)));
         }
     }
     if let Value::Dict(blocks) = arg(c, 2) {
         for (name, b) in blocks {
-            let idx = x.gl.call("getUniformBlockIndex", &[p.clone(), cap.str(*name).into()]).unwrap_or_default();
+            let idx =
+                x.gl.call("getUniformBlockIndex", &[p.clone(), cap.str(*name).into()])
+                    .unwrap_or_default();
             if js::f(&idx) as u32 == u32::MAX || idx.is_undefined() {
                 continue;
             }
-            x.call("uniformBlockBinding", &[p.clone(), idx, js::num(b.as_f64().unwrap_or(0.0))]);
+            x.call(
+                "uniformBlockBinding",
+                &[p.clone(), idx, js::num(b.as_f64().unwrap_or(0.0))],
+            );
         }
     }
     x.call("useProgram", &[JsValue::NULL]);
@@ -390,8 +537,21 @@ fn global_state(x: &mut Ctx, st: &Value) {
     if bc.len() == 4 {
         gl.c("blendColor", &bc);
     }
-    call_nums(x, "blendEquationSeparate", &[num(BLEND_EQUATION_RGB), num(BLEND_EQUATION_ALPHA)]);
-    call_nums(x, "blendFuncSeparate", &[num(BLEND_SRC_RGB), num(BLEND_DST_RGB), num(BLEND_SRC_ALPHA), num(BLEND_DST_ALPHA)]);
+    call_nums(
+        x,
+        "blendEquationSeparate",
+        &[num(BLEND_EQUATION_RGB), num(BLEND_EQUATION_ALPHA)],
+    );
+    call_nums(
+        x,
+        "blendFuncSeparate",
+        &[
+            num(BLEND_SRC_RGB),
+            num(BLEND_DST_RGB),
+            num(BLEND_SRC_ALPHA),
+            num(BLEND_DST_ALPHA),
+        ],
+    );
     let cm = nums(COLOR_WRITEMASK);
     if cm.len() == 4 {
         let a: Vec<JsValue> = cm.iter().map(|v| JsValue::from_bool(*v != 0.0)).collect();
@@ -408,9 +568,16 @@ fn global_state(x: &mut Ctx, st: &Value) {
     }
     call_nums(x, "frontFace", &[num(FRONT_FACE)]);
     call_nums(x, "lineWidth", &[num(LINE_WIDTH)]);
-    call_nums(x, "polygonOffset", &[num(POLYGON_OFFSET_FACTOR), num(POLYGON_OFFSET_UNITS)]);
+    call_nums(
+        x,
+        "polygonOffset",
+        &[num(POLYGON_OFFSET_FACTOR), num(POLYGON_OFFSET_UNITS)],
+    );
     if let (Some(v), Some(inv)) = (num(SAMPLE_COVERAGE_VALUE), num(SAMPLE_COVERAGE_INVERT)) {
-        x.call("sampleCoverage", &[js::num(v), JsValue::from_bool(inv != 0.0)]);
+        x.call(
+            "sampleCoverage",
+            &[js::num(v), JsValue::from_bool(inv != 0.0)],
+        );
     }
     let sb = nums(SCISSOR_BOX);
     if sb.len() == 4 {
@@ -422,24 +589,71 @@ fn global_state(x: &mut Ctx, st: &Value) {
     }
     let front = Some(FRONT as f64);
     let back = Some(BACK as f64);
-    call_nums(x, "stencilFuncSeparate", &[front, num(STENCIL_FUNC), num(STENCIL_REF), num(STENCIL_VALUE_MASK)]);
-    call_nums(x, "stencilFuncSeparate", &[back, num(STENCIL_BACK_FUNC), num(STENCIL_BACK_REF), num(STENCIL_BACK_VALUE_MASK)]);
-    call_nums(x, "stencilOpSeparate", &[front, num(STENCIL_FAIL), num(STENCIL_PASS_DEPTH_FAIL), num(STENCIL_PASS_DEPTH_PASS)]);
+    call_nums(
+        x,
+        "stencilFuncSeparate",
+        &[
+            front,
+            num(STENCIL_FUNC),
+            num(STENCIL_REF),
+            num(STENCIL_VALUE_MASK),
+        ],
+    );
+    call_nums(
+        x,
+        "stencilFuncSeparate",
+        &[
+            back,
+            num(STENCIL_BACK_FUNC),
+            num(STENCIL_BACK_REF),
+            num(STENCIL_BACK_VALUE_MASK),
+        ],
+    );
     call_nums(
         x,
         "stencilOpSeparate",
-        &[back, num(STENCIL_BACK_FAIL), num(STENCIL_BACK_PASS_DEPTH_FAIL), num(STENCIL_BACK_PASS_DEPTH_PASS)],
+        &[
+            front,
+            num(STENCIL_FAIL),
+            num(STENCIL_PASS_DEPTH_FAIL),
+            num(STENCIL_PASS_DEPTH_PASS),
+        ],
+    );
+    call_nums(
+        x,
+        "stencilOpSeparate",
+        &[
+            back,
+            num(STENCIL_BACK_FAIL),
+            num(STENCIL_BACK_PASS_DEPTH_FAIL),
+            num(STENCIL_BACK_PASS_DEPTH_PASS),
+        ],
     );
     call_nums(x, "stencilMaskSeparate", &[front, num(STENCIL_WRITEMASK)]);
-    call_nums(x, "stencilMaskSeparate", &[back, num(STENCIL_BACK_WRITEMASK)]);
+    call_nums(
+        x,
+        "stencilMaskSeparate",
+        &[back, num(STENCIL_BACK_WRITEMASK)],
+    );
     let cc = nums(COLOR_CLEAR_VALUE);
     if cc.len() == 4 {
         gl.c("clearColor", &cc);
     }
     call_nums(x, "clearDepth", &[num(DEPTH_CLEAR_VALUE)]);
     call_nums(x, "clearStencil", &[num(STENCIL_CLEAR_VALUE)]);
-    call_nums(x, "hint", &[Some(GENERATE_MIPMAP_HINT as f64), num(GENERATE_MIPMAP_HINT)]);
-    call_nums(x, "hint", &[Some(FRAGMENT_SHADER_DERIVATIVE_HINT as f64), num(FRAGMENT_SHADER_DERIVATIVE_HINT)]);
+    call_nums(
+        x,
+        "hint",
+        &[Some(GENERATE_MIPMAP_HINT as f64), num(GENERATE_MIPMAP_HINT)],
+    );
+    call_nums(
+        x,
+        "hint",
+        &[
+            Some(FRAGMENT_SHADER_DERIVATIVE_HINT as f64),
+            num(FRAGMENT_SHADER_DERIVATIVE_HINT),
+        ],
+    );
     for p in PIXEL_STORE {
         if let Some(v) = key(p) {
             let v = x.js(v);
@@ -449,8 +663,14 @@ fn global_state(x: &mut Ctx, st: &Value) {
     if let Some(Value::Array(attrs)) = cap.dict_get(st, "currentAttribs") {
         for (i, a) in attrs.iter().enumerate() {
             let m = match a {
-                Value::Typed { kind: TypedKind::Int32, .. } => "vertexAttribI4iv",
-                Value::Typed { kind: TypedKind::Uint32, .. } => "vertexAttribI4uiv",
+                Value::Typed {
+                    kind: TypedKind::Int32,
+                    ..
+                } => "vertexAttribI4iv",
+                Value::Typed {
+                    kind: TypedKind::Uint32,
+                    ..
+                } => "vertexAttribI4uiv",
                 Value::Typed { .. } => "vertexAttrib4fv",
                 _ => continue,
             };
@@ -461,7 +681,12 @@ fn global_state(x: &mut Ctx, st: &Value) {
     if let Some(Value::Array(units)) = cap.dict_get(st, "units") {
         for (u, d) in units.iter().enumerate() {
             gl.c("activeTexture", &[(TEXTURE0 + u as u32) as f64]);
-            for (k, t) in [("2d", TEXTURE_2D), ("cube", TEXTURE_CUBE_MAP), ("3d", TEXTURE_3D), ("array", TEXTURE_2D_ARRAY)] {
+            for (k, t) in [
+                ("2d", TEXTURE_2D),
+                ("cube", TEXTURE_CUBE_MAP),
+                ("3d", TEXTURE_3D),
+                ("array", TEXTURE_2D_ARRAY),
+            ] {
                 let v = cap.dict_get(d, k).unwrap_or(&Value::Null);
                 let v = x.js(v);
                 x.call("bindTexture", &[n(t), v]);
@@ -481,7 +706,16 @@ fn global_state(x: &mut Ctx, st: &Value) {
             let start = get_num(cap, d, "start").unwrap_or(0.0);
             let size = get_num(cap, d, "size").unwrap_or(0.0);
             if size > 0.0 {
-                x.call("bindBufferRange", &[n(UNIFORM_BUFFER), n(i as u32), b, js::num(start), js::num(size)]);
+                x.call(
+                    "bindBufferRange",
+                    &[
+                        n(UNIFORM_BUFFER),
+                        n(i as u32),
+                        b,
+                        js::num(start),
+                        js::num(size),
+                    ],
+                );
             } else {
                 x.call("bindBufferBase", &[n(UNIFORM_BUFFER), n(i as u32), b]);
             }
@@ -495,16 +729,46 @@ fn global_state(x: &mut Ctx, st: &Value) {
     };
     bind(x, "bindBuffer", ARRAY_BUFFER, ARRAY_BUFFER_BINDING);
     bind(x, "bindBuffer", COPY_READ_BUFFER, COPY_READ_BUFFER_BINDING);
-    bind(x, "bindBuffer", COPY_WRITE_BUFFER, COPY_WRITE_BUFFER_BINDING);
-    bind(x, "bindBuffer", PIXEL_PACK_BUFFER, PIXEL_PACK_BUFFER_BINDING);
-    bind(x, "bindBuffer", PIXEL_UNPACK_BUFFER, PIXEL_UNPACK_BUFFER_BINDING);
+    bind(
+        x,
+        "bindBuffer",
+        COPY_WRITE_BUFFER,
+        COPY_WRITE_BUFFER_BINDING,
+    );
+    bind(
+        x,
+        "bindBuffer",
+        PIXEL_PACK_BUFFER,
+        PIXEL_PACK_BUFFER_BINDING,
+    );
+    bind(
+        x,
+        "bindBuffer",
+        PIXEL_UNPACK_BUFFER,
+        PIXEL_UNPACK_BUFFER_BINDING,
+    );
     bind(x, "bindBuffer", UNIFORM_BUFFER, UNIFORM_BUFFER_BINDING);
     if key(TRANSFORM_FEEDBACK_BUFFER_BINDING).is_some_and(|v| !v.is_nullish()) {
-        bind(x, "bindBuffer", TRANSFORM_FEEDBACK_BUFFER, TRANSFORM_FEEDBACK_BUFFER_BINDING);
+        bind(
+            x,
+            "bindBuffer",
+            TRANSFORM_FEEDBACK_BUFFER,
+            TRANSFORM_FEEDBACK_BUFFER_BINDING,
+        );
     }
     bind(x, "bindRenderbuffer", RENDERBUFFER, RENDERBUFFER_BINDING);
-    bind(x, "bindFramebuffer", DRAW_FRAMEBUFFER, DRAW_FRAMEBUFFER_BINDING);
-    bind(x, "bindFramebuffer", READ_FRAMEBUFFER, READ_FRAMEBUFFER_BINDING);
+    bind(
+        x,
+        "bindFramebuffer",
+        DRAW_FRAMEBUFFER,
+        DRAW_FRAMEBUFFER_BINDING,
+    );
+    bind(
+        x,
+        "bindFramebuffer",
+        READ_FRAMEBUFFER,
+        READ_FRAMEBUFFER_BINDING,
+    );
     if let Some(v) = key(VERTEX_ARRAY_BINDING) {
         let v = x.js(v);
         x.call("bindVertexArray", &[v]);

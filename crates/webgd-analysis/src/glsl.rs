@@ -5,10 +5,11 @@ use std::collections::{HashMap, HashSet};
 use glsl_lang::ast::{
     ArraySpecifier, ArraySpecifierDimensionData, AssignmentOpData, BinaryOpData, BlockData,
     ConditionData, DeclarationData, ExprData, ExternalDeclarationData, ForInitStatementData,
-    FunIdentifierData, FunctionDefinition, FunctionParameterDeclarationData, Initializer, InitializerData,
-    IterationStatementData, JumpStatementData, LayoutQualifierSpecData, SelectionRestStatementData,
-    SingleDeclaration, StatementData, StorageQualifierData, StructFieldSpecifier, TranslationUnit,
-    TypeQualifier, TypeQualifierSpecData, TypeSpecifier, TypeSpecifierNonArrayData, UnaryOpData,
+    FunIdentifierData, FunctionDefinition, FunctionParameterDeclarationData, Initializer,
+    InitializerData, IterationStatementData, JumpStatementData, LayoutQualifierSpecData,
+    SelectionRestStatementData, SingleDeclaration, StatementData, StorageQualifierData,
+    StructFieldSpecifier, TranslationUnit, TypeQualifier, TypeQualifierSpecData, TypeSpecifier,
+    TypeSpecifierNonArrayData, UnaryOpData,
 };
 use glsl_lang::parse::DefaultParse;
 
@@ -19,7 +20,10 @@ use crate::{AnalysisError, Stage, StageStats};
 #[derive(Clone, Debug, PartialEq)]
 enum Ty {
     /// `rows x cols`: scalar 1x1, vecN Nx1, matCxR RxC.
-    Num { rows: u32, cols: u32 },
+    Num {
+        rows: u32,
+        cols: u32,
+    },
     Struct(String),
     Array(Box<Ty>, u32),
     Other,
@@ -47,13 +51,17 @@ fn preprocess(src: &str) -> String {
 
 pub fn stats(src: &str, stage: Stage) -> Result<StageStats, AnalysisError> {
     let src = preprocess(src);
-    let tu = TranslationUnit::parse(src.as_str()).map_err(|e| AnalysisError::Parse(e.to_string()))?;
+    let tu =
+        TranslationUnit::parse(src.as_str()).map_err(|e| AnalysisError::Parse(e.to_string()))?;
 
     let mut a = Analyzer::default();
     for ed in &tu.0 {
         match &ed.content {
             ExternalDeclarationData::FunctionDefinition(fd) => {
-                a.functions.entry(fd.prototype.name.0.to_string()).or_default().push(fd);
+                a.functions
+                    .entry(fd.prototype.name.0.to_string())
+                    .or_default()
+                    .push(fd);
             }
             ExternalDeclarationData::Declaration(d) => a.global_declaration(&d.content, stage),
             ExternalDeclarationData::Preprocessor(_) => {}
@@ -62,7 +70,11 @@ pub fn stats(src: &str, stage: Stage) -> Result<StageStats, AnalysisError> {
     let main = a
         .functions
         .get("main")
-        .and_then(|v| v.iter().find(|f| f.prototype.parameters.is_empty()).copied())
+        .and_then(|v| {
+            v.iter()
+                .find(|f| f.prototype.parameters.is_empty())
+                .copied()
+        })
         .ok_or(AnalysisError::NoEntry)?;
     let cost = a.call_def(main);
     Ok(StageStats {
@@ -71,7 +83,11 @@ pub fn stats(src: &str, stage: Stage) -> Result<StageStats, AnalysisError> {
         tex_samples: cost.tex,
         est_regs_vec4: model::est_regs_vec4(a.io_components + a.local_components),
         workgroup_size: (stage == Stage::Compute).then_some(a.local_size),
-        workgroup_bytes: if stage == Stage::Compute { a.shared_bytes } else { 0 },
+        workgroup_bytes: if stage == Stage::Compute {
+            a.shared_bytes
+        } else {
+            0
+        },
     })
 }
 
@@ -120,7 +136,9 @@ fn storage(q: Option<&TypeQualifier>, stage: Stage) -> Storage {
     for spec in q.iter().flat_map(|q| q.qualifiers.iter()) {
         if let TypeQualifierSpecData::Storage(st) = &spec.content {
             match &st.content {
-                StorageQualifierData::In | StorageQualifierData::Out | StorageQualifierData::Attribute => s.io = true,
+                StorageQualifierData::In
+                | StorageQualifierData::Out
+                | StorageQualifierData::Attribute => s.io = true,
                 StorageQualifierData::Varying => s.io = stage != Stage::Compute,
                 StorageQualifierData::Shared => s.shared = true,
                 StorageQualifierData::Const => s.constant = true,
@@ -137,7 +155,10 @@ impl<'a> Analyzer<'a> {
     fn components(&self, t: &Ty) -> u32 {
         match t {
             Ty::Num { rows, cols } => rows * cols,
-            Ty::Struct(n) => self.structs.get(n).map_or(0, |f| f.iter().map(|(_, t)| self.components(t)).sum()),
+            Ty::Struct(n) => self
+                .structs
+                .get(n)
+                .map_or(0, |f| f.iter().map(|(_, t)| self.components(t)).sum()),
             Ty::Array(e, n) => n.saturating_mul(self.components(e)),
             Ty::Other => 0,
         }
@@ -205,7 +226,9 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            T::TypeName(n) if self.structs.contains_key(n.0.as_str()) => Ty::Struct(n.0.to_string()),
+            T::TypeName(n) if self.structs.contains_key(n.0.as_str()) => {
+                Ty::Struct(n.0.to_string())
+            }
             _ => Ty::Other,
         };
         self.with_array(base, ts.array_specifier.as_ref())
@@ -216,7 +239,10 @@ impl<'a> Analyzer<'a> {
         for f in fields {
             let t = self.type_spec(&f.ty);
             for id in &f.identifiers {
-                out.push((id.ident.0.to_string(), self.with_array(t.clone(), id.array_spec.as_ref())));
+                out.push((
+                    id.ident.0.to_string(),
+                    self.with_array(t.clone(), id.array_spec.as_ref()),
+                ));
             }
         }
         out
@@ -266,7 +292,8 @@ impl<'a> Analyzer<'a> {
                 for spec in &q.qualifiers {
                     if let TypeQualifierSpecData::Layout(l) = &spec.content {
                         for id in &l.ids {
-                            if let LayoutQualifierSpecData::Identifier(name, Some(e)) = &id.content {
+                            if let LayoutQualifierSpecData::Identifier(name, Some(e)) = &id.content
+                            {
                                 let axis = match name.0.as_str() {
                                     "local_size_x" => 0,
                                     "local_size_y" => 1,
@@ -340,7 +367,10 @@ impl<'a> Analyzer<'a> {
         for p in &fd.prototype.parameters {
             if let FunctionParameterDeclarationData::Named(_, d) = &p.content {
                 let t = self.type_spec(&d.ty);
-                params.insert(d.ident.ident.0.to_string(), self.with_array(t, d.ident.array_spec.as_ref()));
+                params.insert(
+                    d.ident.ident.0.to_string(),
+                    self.with_array(t, d.ident.array_spec.as_ref()),
+                );
             }
         }
         self.scopes.push(params);
@@ -374,10 +404,13 @@ impl<'a> Analyzer<'a> {
             StatementData::Selection(sel) => {
                 let mut c = self.expr(&sel.cond).0;
                 let (accept, reject) = match &sel.rest.content {
-                    SelectionRestStatementData::Statement(a) => (self.scoped(|s| s.statement(a)), Cost::ZERO),
-                    SelectionRestStatementData::Else(a, r) => {
-                        (self.scoped(|s| s.statement(a)), self.scoped(|s| s.statement(r)))
+                    SelectionRestStatementData::Statement(a) => {
+                        (self.scoped(|s| s.statement(a)), Cost::ZERO)
                     }
+                    SelectionRestStatementData::Else(a, r) => (
+                        self.scoped(|s| s.statement(a)),
+                        self.scoped(|s| s.statement(r)),
+                    ),
                 };
                 c.add(model::if_cost(accept, reject));
                 c
@@ -415,10 +448,15 @@ impl<'a> Analyzer<'a> {
                 }
                 IterationStatementData::For(init, rest, body) => {
                     let mut c = match &init.content {
-                        ForInitStatementData::Expression(e) => e.as_ref().map_or(Cost::ZERO, |e| a.expr(e).0),
+                        ForInitStatementData::Expression(e) => {
+                            e.as_ref().map_or(Cost::ZERO, |e| a.expr(e).0)
+                        }
                         ForInitStatementData::Declaration(d) => a.local_declaration(d),
                     };
-                    let mut i = rest.condition.as_ref().map_or(Cost::ZERO, |cond| a.condition(cond));
+                    let mut i = rest
+                        .condition
+                        .as_ref()
+                        .map_or(Cost::ZERO, |cond| a.condition(cond));
                     i.add(a.scoped(|a| a.statement(body)));
                     if let Some(p) = &rest.post_expr {
                         i.add(a.expr(p).0);
@@ -501,7 +539,10 @@ impl<'a> Analyzer<'a> {
             let l_mat = lc > 1;
             let r_mat = rc > 1;
             if l_mat && r_mat {
-                return (model::mat_mat_cost(lr, rc, lc), Ty::Num { rows: lr, cols: rc });
+                return (
+                    model::mat_mat_cost(lr, rc, lc),
+                    Ty::Num { rows: lr, cols: rc },
+                );
             }
             if l_mat && rr > 1 {
                 return (model::mat_vec_cost(lr, lc), Ty::vec(lr));
@@ -510,7 +551,11 @@ impl<'a> Analyzer<'a> {
                 return (model::mat_vec_cost(rr, rc), Ty::vec(rc));
             }
         }
-        let t = if self.width(l) >= self.width(r) { l.clone() } else { r.clone() };
+        let t = if self.width(l) >= self.width(r) {
+            l.clone()
+        } else {
+            r.clone()
+        };
         (model::binary_cost(self.width(&t)), t)
     }
 
@@ -666,9 +711,16 @@ fn builtin_var(name: &str) -> Ty {
     match name {
         "gl_Position" | "gl_FragCoord" | "gl_FragColor" => Ty::vec(4),
         "gl_PointCoord" => Ty::vec(2),
-        "gl_GlobalInvocationID" | "gl_LocalInvocationID" | "gl_WorkGroupID" | "gl_NumWorkGroups"
+        "gl_GlobalInvocationID"
+        | "gl_LocalInvocationID"
+        | "gl_WorkGroupID"
+        | "gl_NumWorkGroups"
         | "gl_WorkGroupSize" => Ty::vec(3),
-        "gl_VertexID" | "gl_InstanceID" | "gl_PointSize" | "gl_FragDepth" | "gl_FrontFacing"
+        "gl_VertexID"
+        | "gl_InstanceID"
+        | "gl_PointSize"
+        | "gl_FragDepth"
+        | "gl_FrontFacing"
         | "gl_LocalInvocationIndex" => SCALAR,
         _ => Ty::Other,
     }

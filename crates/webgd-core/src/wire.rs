@@ -32,7 +32,9 @@ impl<'a> Reader<'a> {
                 self.pos = end;
                 Ok(s)
             }
-            None => Err(WireError::Truncated { offset: self.b.len() }),
+            None => Err(WireError::Truncated {
+                offset: self.b.len(),
+            }),
         }
     }
     fn u8(&mut self) -> Result<u8, WireError> {
@@ -103,8 +105,14 @@ impl Decoder<'_> {
             7 => {
                 let kat = self.r.pos;
                 let k = self.r.u8()?;
-                let kind = TypedKind::from_u8(k).ok_or(WireError::UnknownTag { offset: kat, tag: k })?;
-                Value::Typed { kind, blob: self.blob_ref()? }
+                let kind = TypedKind::from_u8(k).ok_or(WireError::UnknownTag {
+                    offset: kat,
+                    tag: k,
+                })?;
+                Value::Typed {
+                    kind,
+                    blob: self.blob_ref()?,
+                }
             }
             8 => {
                 let n = self.r.u32()?;
@@ -126,7 +134,11 @@ impl Decoder<'_> {
             10 => {
                 let width = self.r.u32()?;
                 let height = self.r.u32()?;
-                Value::Image { width, height, blob: self.blob_ref()? }
+                Value::Image {
+                    width,
+                    height,
+                    blob: self.blob_ref()?,
+                }
             }
             11 => Value::Pending(self.r.u32()?),
             12 => Value::Opaque(self.sym()?),
@@ -161,7 +173,9 @@ impl Decoder<'_> {
                     let class = self.sym()?;
                     let parent = self.obj(true)?;
                     let parent = (parent.0 != 0).then_some(parent);
-                    self.cap.objects.insert(id, ObjectInfo { id, class, parent });
+                    self.cap
+                        .objects
+                        .insert(id, ObjectInfo { id, class, parent });
                 }
                 0x03 => {
                     let id = self.r.u32()? as usize;
@@ -185,7 +199,12 @@ impl Decoder<'_> {
                         args.push(self.value()?);
                     }
                     let result = self.value()?;
-                    let call = Call { this, method, args, result };
+                    let call = Call {
+                        this,
+                        method,
+                        args,
+                        result,
+                    };
                     match section {
                         0 => self.cap.setup.push(call),
                         1 => self.cap.snapshot.push(call),
@@ -201,5 +220,11 @@ impl Decoder<'_> {
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Capture, WireError> {
-    Decoder { r: Reader { b: bytes, pos: 0 }, cap: Capture::default(), str_ok: Vec::new(), blob_ok: Vec::new() }.run()
+    Decoder {
+        r: Reader { b: bytes, pos: 0 },
+        cap: Capture::default(),
+        str_ok: Vec::new(),
+        blob_ok: Vec::new(),
+    }
+    .run()
 }

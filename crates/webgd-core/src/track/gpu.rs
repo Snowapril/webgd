@@ -35,7 +35,9 @@ fn is_pass_class(class: &str) -> bool {
 /// The tracked pass is the pass encoder that is `this` of `frame[index]`; otherwise the most
 /// recently begun pass not yet ended at `index`; otherwise none.
 pub fn state_at(cap: &Capture, index: usize) -> GpuState {
-    let Some(cur) = cap.frame.get(index) else { return GpuState::default() };
+    let Some(cur) = cap.frame.get(index) else {
+        return GpuState::default();
+    };
     let pass_id = if is_pass_class(cap.class_of(cur.this)) {
         Some(cur.this)
     } else {
@@ -50,7 +52,9 @@ pub fn state_at(cap: &Capture, index: usize) -> GpuState {
         }
         open.last().copied()
     };
-    let Some(pass) = pass_id else { return GpuState::default() };
+    let Some(pass) = pass_id else {
+        return GpuState::default();
+    };
 
     let begin = cap.frame[..=index].iter().rposition(|c| {
         matches!(cap.method(c), "beginRenderPass" | "beginComputePass")
@@ -59,10 +63,17 @@ pub fn state_at(cap: &Capture, index: usize) -> GpuState {
     let (encoder, desc, start) = match begin {
         Some(b) => {
             let c = &cap.frame[b];
-            (c.this, c.args.first().cloned().unwrap_or(Value::Undefined), b + 1)
+            (
+                c.this,
+                c.args.first().cloned().unwrap_or(Value::Undefined),
+                b + 1,
+            )
         }
         None => (
-            cap.objects.get(&pass).and_then(|o| o.parent).unwrap_or(ObjId(0)),
+            cap.objects
+                .get(&pass)
+                .and_then(|o| o.parent)
+                .unwrap_or(ObjId(0)),
             Value::Undefined,
             0,
         ),
@@ -149,8 +160,15 @@ pub fn state_at(cap: &Capture, index: usize) -> GpuState {
 /// `setBindGroup` trailing args: `[offsets: Array]` or `[Uint32Array, start, length]`.
 fn dynamic_offsets(cap: &Capture, rest: &[Value]) -> Vec<u32> {
     match rest.first() {
-        Some(Value::Array(items)) => items.iter().filter_map(Value::as_f64).map(|n| n as u32).collect(),
-        Some(Value::Typed { kind: TypedKind::Uint32, blob }) => {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_f64)
+            .map(|n| n as u32)
+            .collect(),
+        Some(Value::Typed {
+            kind: TypedKind::Uint32,
+            blob,
+        }) => {
             let all: Vec<u32> = cap
                 .blob(*blob)
                 .as_chunks::<4>()
@@ -158,8 +176,15 @@ fn dynamic_offsets(cap: &Capture, rest: &[Value]) -> Vec<u32> {
                 .iter()
                 .map(|c| u32::from_le_bytes(*c))
                 .collect();
-            let start = rest.get(1).and_then(Value::as_f64).map_or(0, |n| n as usize).min(all.len());
-            let len = rest.get(2).and_then(Value::as_f64).map_or(all.len() - start, |n| n as usize);
+            let start = rest
+                .get(1)
+                .and_then(Value::as_f64)
+                .map_or(0, |n| n as usize)
+                .min(all.len());
+            let len = rest
+                .get(2)
+                .and_then(Value::as_f64)
+                .map_or(all.len() - start, |n| n as usize);
             all[start..(start + len).min(all.len())].to_vec()
         }
         _ => Vec::new(),

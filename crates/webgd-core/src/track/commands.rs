@@ -57,7 +57,10 @@ pub fn classify(cap: &Capture, call: &Call) -> CmdKind {
             CmdKind::Draw
         }
         "submit" if class == "GPUQueue" => CmdKind::Submit,
-        "writeBuffer" | "writeTexture" | "copyExternalImageToTexture" | "resolveQuerySet"
+        "writeBuffer"
+        | "writeTexture"
+        | "copyExternalImageToTexture"
+        | "resolveQuerySet"
         | "clearBuffer" => CmdKind::Copy,
         _ if m.starts_with("dispatchWorkgroups") => CmdKind::Dispatch,
         _ if m.starts_with("copy") => CmdKind::Copy,
@@ -85,13 +88,20 @@ pub fn build_tree(cap: &Capture) -> Vec<CmdNode> {
                     _ => String::new(),
                 }),
             };
-            nodes.push(CmdNode { index: i, depth, kind, span_end: i });
+            nodes.push(CmdNode {
+                index: i,
+                depth,
+                kind,
+                span_end: i,
+            });
             stack.push((scope, i));
             continue;
         }
         let close = match m {
             "end" => Some((Scope::Pass(call.this), CmdKind::PassEnd)),
-            "popDebugGroup" | "webgd:popMarker" => Some((Scope::Group(call.this), CmdKind::GroupEnd)),
+            "popDebugGroup" | "webgd:popMarker" => {
+                Some((Scope::Group(call.this), CmdKind::GroupEnd))
+            }
             _ => None,
         };
         if let Some((scope, kind)) = close
@@ -101,11 +111,21 @@ pub fn build_tree(cap: &Capture) -> Vec<CmdNode> {
             for (_, opener) in stack.drain(pos..) {
                 nodes[opener].span_end = i;
             }
-            nodes.push(CmdNode { index: i, depth: pos as u16, kind, span_end: i });
+            nodes.push(CmdNode {
+                index: i,
+                depth: pos as u16,
+                kind,
+                span_end: i,
+            });
             continue;
         }
         // Unbalanced closes fall through as plain calls.
-        nodes.push(CmdNode { index: i, depth, kind: classify(cap, call), span_end: i });
+        nodes.push(CmdNode {
+            index: i,
+            depth,
+            kind: classify(cap, call),
+            span_end: i,
+        });
     }
     if let Some(last) = cap.frame.len().checked_sub(1) {
         for (_, opener) in stack {

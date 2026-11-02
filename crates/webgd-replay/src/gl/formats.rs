@@ -31,7 +31,12 @@ impl ReadClass {
             ReadClass::Srgb => (RGBA, UNSIGNED_BYTE, "Uint8Array", PixelFormat::Rgba8Srgb),
             ReadClass::Float => (RGBA, FLOAT, "Float32Array", PixelFormat::Rgba32Float),
             ReadClass::Int => (RGBA_INTEGER, INT, "Int32Array", PixelFormat::Rgba32Sint),
-            ReadClass::Uint => (RGBA_INTEGER, UNSIGNED_INT, "Uint32Array", PixelFormat::Rgba32Uint),
+            ReadClass::Uint => (
+                RGBA_INTEGER,
+                UNSIGNED_INT,
+                "Uint32Array",
+                PixelFormat::Rgba32Uint,
+            ),
         }
     }
 
@@ -69,10 +74,16 @@ pub fn read_class(internalformat: u32) -> Option<ReadClass> {
     let (format, ty) = canonical_format_type(internalformat).unwrap_or((RGBA, UNSIGNED_BYTE));
     Some(match internalformat {
         SRGB8_ALPHA8 | SRGB8 => ReadClass::Srgb,
-        _ if matches!(format, RED_INTEGER | RG_INTEGER | RGB_INTEGER | RGBA_INTEGER) => match ty {
-            BYTE | SHORT | INT => ReadClass::Int,
-            _ => ReadClass::Uint,
-        },
+        _ if matches!(
+            format,
+            RED_INTEGER | RG_INTEGER | RGB_INTEGER | RGBA_INTEGER
+        ) =>
+        {
+            match ty {
+                BYTE | SHORT | INT => ReadClass::Int,
+                _ => ReadClass::Uint,
+            }
+        }
         _ if matches!(ty, FLOAT | HALF_FLOAT) => ReadClass::Float,
         _ => ReadClass::Unorm,
     })

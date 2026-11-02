@@ -6,7 +6,10 @@ use webgd_core::track::gpu::{PassState, state_at};
 use webgd_core::{Capture, ObjId, Value};
 
 fn leaf(name: &str, value: String) -> StateNode {
-    StateNode::Leaf { name: name.to_string(), value }
+    StateNode::Leaf {
+        name: name.to_string(),
+        value,
+    }
 }
 
 /// (texture, base mip, base layer) of a texture view.
@@ -22,14 +25,24 @@ fn view_target(cap: &Capture, view: ObjId) -> Option<(ObjId, u32, u32)> {
 
 async fn read_view(st: &ReplayState, cap: &Capture, label: String, view: ObjId) -> TargetView {
     let Some((tex, mip, layer)) = view_target(cap, view) else {
-        return TargetView { label, resource: Some(view), image: None, note: Some("view texture unknown".into()) };
+        return TargetView {
+            label,
+            resource: Some(view),
+            image: None,
+            note: Some("view texture unknown".into()),
+        };
     };
     let (image, note) = match st.read_texture(cap, tex, mip, layer).await {
         Ok(i) => (Some(i), None),
         Err(crate::ReplayError::Js { message, .. }) => (None, Some(message)),
         Err(e) => (None, Some(e.to_string())),
     };
-    TargetView { label, resource: Some(tex), image, note }
+    TargetView {
+        label,
+        resource: Some(tex),
+        image,
+        note,
+    }
 }
 
 fn visibility(v: u32) -> String {
@@ -44,18 +57,33 @@ fn visibility(v: u32) -> String {
 
 /// Layout entry summary for `binding` of a bind group layout.
 fn layout_detail(cap: &Capture, layout: Option<ObjId>, binding: u32) -> String {
-    let Some(layout) = layout else { return String::new() };
-    let Some(call) = creation_call(cap, layout) else { return String::new() };
+    let Some(layout) = layout else {
+        return String::new();
+    };
+    let Some(call) = creation_call(cap, layout) else {
+        return String::new();
+    };
     if cap.method(call) == "getBindGroupLayout" {
         return "auto layout".into();
     }
-    let entries = call.args.first().and_then(|d| cap.dict_get(d, "entries")).and_then(Value::as_array).unwrap_or(&[]);
+    let entries = call
+        .args
+        .first()
+        .and_then(|d| cap.dict_get(d, "entries"))
+        .and_then(Value::as_array)
+        .unwrap_or(&[]);
     for e in entries {
         if get_num(cap, e, "binding").map(|b| b as u32) != Some(binding) {
             continue;
         }
         let vis = visibility(get_num(cap, e, "visibility").unwrap_or(0.0) as u32);
-        for kind in ["buffer", "sampler", "texture", "storageTexture", "externalTexture"] {
+        for kind in [
+            "buffer",
+            "sampler",
+            "texture",
+            "storageTexture",
+            "externalTexture",
+        ] {
             if let Some(d) = cap.dict_get(e, kind) {
                 let ty = ["type", "sampleType", "access"]
                     .iter()
@@ -73,11 +101,18 @@ fn layout_detail(cap: &Capture, layout: Option<ObjId>, binding: u32) -> String {
 }
 
 pub async fn inspect(st: &ReplayState, cap: &Capture, index: usize) -> Inspection {
-    let mut ins = Inspection { index, targets: Vec::new(), pipeline: Vec::new(), bindings: Vec::new(), notes: Vec::new() };
+    let mut ins = Inspection {
+        index,
+        targets: Vec::new(),
+        pipeline: Vec::new(),
+        bindings: Vec::new(),
+        notes: Vec::new(),
+    };
     if let Some(c) = cap.frame.get(index)
         && cap.class_of(c.this) == "GPURenderBundleEncoder"
     {
-        ins.notes.push("bundle recording — select executeBundles".into());
+        ins.notes
+            .push("bundle recording — select executeBundles".into());
         return ins;
     }
     let Some(ps) = state_at(cap, index).pass else {
@@ -87,9 +122,14 @@ pub async fn inspect(st: &ReplayState, cap: &Capture, index: usize) -> Inspectio
 
     // Targets.
     if !ps.compute {
-        let colors = cap.dict_get(&ps.desc, "colorAttachments").and_then(Value::as_array).unwrap_or(&[]);
+        let colors = cap
+            .dict_get(&ps.desc, "colorAttachments")
+            .and_then(Value::as_array)
+            .unwrap_or(&[]);
         for (i, a) in colors.iter().enumerate() {
-            let Some(view) = cap.dict_get(a, "view").and_then(Value::as_obj) else { continue };
+            let Some(view) = cap.dict_get(a, "view").and_then(Value::as_obj) else {
+                continue;
+            };
             let resolve = cap.dict_get(a, "resolveTarget").and_then(Value::as_obj);
             let ms = view_target(cap, view)
                 .and_then(|(t, _, _)| st.objs.fwd.get(&t))
@@ -97,7 +137,9 @@ pub async fn inspect(st: &ReplayState, cap: &Capture, index: usize) -> Inspectio
             let t = match (ms, resolve) {
                 (true, Some(r)) => {
                     let mut t = read_view(st, cap, format!("Color {i} (resolve target)"), r).await;
-                    t.note.get_or_insert_with(|| "multisampled; showing resolve target (written at pass end)".into());
+                    t.note.get_or_insert_with(|| {
+                        "multisampled; showing resolve target (written at pass end)".into()
+                    });
                     t
                 }
                 _ => read_view(st, cap, format!("Color {i}"), view).await,
@@ -107,15 +149,27 @@ pub async fn inspect(st: &ReplayState, cap: &Capture, index: usize) -> Inspectio
         if let Some(ds) = cap.dict_get(&ps.desc, "depthStencilAttachment")
             && let Some(view) = cap.dict_get(ds, "view").and_then(Value::as_obj)
         {
-            ins.targets.push(read_view(st, cap, "Depth/Stencil".into(), view).await);
+            ins.targets
+                .push(read_view(st, cap, "Depth/Stencil".into(), view).await);
         }
     }
 
-    if ps.pipeline.is_none() && cap.frame.get(index).is_some_and(|c| cap.method(c) == "executeBundles") {
-        for b in cap.frame[index].args.first().and_then(Value::as_array).unwrap_or(&[]) {
+    if ps.pipeline.is_none()
+        && cap
+            .frame
+            .get(index)
+            .is_some_and(|c| cap.method(c) == "executeBundles")
+    {
+        for b in cap.frame[index]
+            .args
+            .first()
+            .and_then(Value::as_array)
+            .unwrap_or(&[])
+        {
             let Some(bundle) = b.as_obj() else { continue };
             if let Some(bs) = bundle_state(cap, bundle) {
-                ins.notes.push(format!("state recorded in {}", obj_label(cap, bundle)));
+                ins.notes
+                    .push(format!("state recorded in {}", obj_label(cap, bundle)));
                 describe(cap, &bs, &mut ins, false);
             }
         }
@@ -142,24 +196,42 @@ fn bundle_state(cap: &Capture, bundle: ObjId) -> Option<PassState> {
         blend_constant: None,
         stencil_ref: None,
     };
-    for c in cap.setup.iter().chain(cap.frame.iter()).filter(|c| c.this == enc) {
+    for c in cap
+        .setup
+        .iter()
+        .chain(cap.frame.iter())
+        .filter(|c| c.this == enc)
+    {
         let num = |i: usize| c.args.get(i).and_then(Value::as_f64);
         match cap.method(c) {
             "setPipeline" => ps.pipeline = c.args.first().and_then(Value::as_obj),
             "setBindGroup" => {
                 if let (Some(i), Some(bg)) = (num(0), c.args.get(1).and_then(Value::as_obj)) {
-                    let offs = c.args.get(2).map(|v| crate::util::num_list(cap, v).into_iter().map(|x| x as u32).collect()).unwrap_or_default();
+                    let offs = c
+                        .args
+                        .get(2)
+                        .map(|v| {
+                            crate::util::num_list(cap, v)
+                                .into_iter()
+                                .map(|x| x as u32)
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     ps.bind_groups.insert(i as u32, (bg, offs));
                 }
             }
             "setVertexBuffer" => {
                 if let (Some(i), Some(b)) = (num(0), c.args.get(1).and_then(Value::as_obj)) {
-                    ps.vertex_buffers.insert(i as u32, (b, num(2).unwrap_or(0.0), num(3)));
+                    ps.vertex_buffers
+                        .insert(i as u32, (b, num(2).unwrap_or(0.0), num(3)));
                 }
             }
             "setIndexBuffer" => {
-                if let (Some(b), Some(Value::String(f))) = (c.args.first().and_then(Value::as_obj), c.args.get(1)) {
-                    ps.index_buffer = Some((b, cap.str(*f).to_string(), num(2).unwrap_or(0.0), num(3)));
+                if let (Some(b), Some(Value::String(f))) =
+                    (c.args.first().and_then(Value::as_obj), c.args.get(1))
+                {
+                    ps.index_buffer =
+                        Some((b, cap.str(*f).to_string(), num(2).unwrap_or(0.0), num(3)));
                 }
             }
             "finish" => break,
@@ -181,28 +253,58 @@ fn describe(cap: &Capture, ps: &PassState, ins: &mut Inspection, dynamic_state: 
     }
     if dynamic_state {
         let mut dynamic = Vec::new();
-        let fmt_list = |v: &[f64]| v.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ");
-        dynamic.push(leaf("viewport", ps.viewport.map(|v| fmt_list(&v)).unwrap_or_else(|| "full target".into())));
-        dynamic.push(leaf("scissor", ps.scissor.map(|v| fmt_list(&v)).unwrap_or_else(|| "full target".into())));
+        let fmt_list = |v: &[f64]| {
+            v.iter()
+                .map(|x| format!("{x}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        dynamic.push(leaf(
+            "viewport",
+            ps.viewport
+                .map(|v| fmt_list(&v))
+                .unwrap_or_else(|| "full target".into()),
+        ));
+        dynamic.push(leaf(
+            "scissor",
+            ps.scissor
+                .map(|v| fmt_list(&v))
+                .unwrap_or_else(|| "full target".into()),
+        ));
         dynamic.push(match &ps.blend_constant {
             Some(v @ (Value::Dict(_) | Value::Array(_))) => value_tree(cap, "blendConstant", v),
             Some(v) => leaf("blendConstant", value_label(cap, v)),
             None => leaf("blendConstant", "[0, 0, 0, 0]".into()),
         });
-        dynamic.push(leaf("stencilReference", format!("{}", ps.stencil_ref.unwrap_or(0.0))));
-        ins.pipeline.push(StateNode::Group { name: "Dynamic".into(), children: dynamic });
+        dynamic.push(leaf(
+            "stencilReference",
+            format!("{}", ps.stencil_ref.unwrap_or(0.0)),
+        ));
+        ins.pipeline.push(StateNode::Group {
+            name: "Dynamic".into(),
+            children: dynamic,
+        });
     }
 
     // Bindings.
     for (idx, (bg, offsets)) in &ps.bind_groups {
         let group = format!("Bind group {idx} ({})", obj_label(cap, *bg));
         let Some(desc) = creation_desc(cap, *bg) else {
-            ins.bindings.push(BindingRow { group, slot: "?".into(), resource: Some(*bg), detail: "descriptor unknown".into() });
+            ins.bindings.push(BindingRow {
+                group,
+                slot: "?".into(),
+                resource: Some(*bg),
+                detail: "descriptor unknown".into(),
+            });
             continue;
         };
         let layout = cap.dict_get(desc, "layout").and_then(Value::as_obj);
         let mut dyn_iter = offsets.iter();
-        for e in cap.dict_get(desc, "entries").and_then(Value::as_array).unwrap_or(&[]) {
+        for e in cap
+            .dict_get(desc, "entries")
+            .and_then(Value::as_array)
+            .unwrap_or(&[])
+        {
             let binding = get_num(cap, e, "binding").unwrap_or(0.0) as u32;
             let res = cap.dict_get(e, "resource").unwrap_or(&Value::Undefined);
             let ld = layout_detail(cap, layout, binding);
@@ -217,15 +319,27 @@ fn describe(cap: &Capture, ps: &PassState, ins: &mut Inspection, dynamic_state: 
                 Value::Dict(_) => {
                     let buf = cap.dict_get(res, "buffer").and_then(Value::as_obj);
                     let off = get_num(cap, res, "offset").unwrap_or(0.0);
-                    let size = get_num(cap, res, "size").map(|s| s.to_string()).unwrap_or_else(|| "rest".into());
-                    let mut d = format!("{} offset {off} size {size}", buf.map(|b| obj_label(cap, b)).unwrap_or_default());
+                    let size = get_num(cap, res, "size")
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "rest".into());
+                    let mut d = format!(
+                        "{} offset {off} size {size}",
+                        buf.map(|b| obj_label(cap, b)).unwrap_or_default()
+                    );
                     let dynamic = layout.and_then(|l| creation_call(cap, l)).is_some_and(|c| {
-                        c.args.first().and_then(|d| cap.dict_get(d, "entries")).and_then(Value::as_array).is_some_and(|es| {
-                            es.iter().any(|le| {
-                                get_num(cap, le, "binding") == Some(binding as f64)
-                                    && cap.dict_get(le, "buffer").and_then(|b| cap.dict_get(b, "hasDynamicOffset")) == Some(&Value::Bool(true))
+                        c.args
+                            .first()
+                            .and_then(|d| cap.dict_get(d, "entries"))
+                            .and_then(Value::as_array)
+                            .is_some_and(|es| {
+                                es.iter().any(|le| {
+                                    get_num(cap, le, "binding") == Some(binding as f64)
+                                        && cap
+                                            .dict_get(le, "buffer")
+                                            .and_then(|b| cap.dict_get(b, "hasDynamicOffset"))
+                                            == Some(&Value::Bool(true))
+                                })
                             })
-                        })
                     });
                     if dynamic && let Some(o) = dyn_iter.next() {
                         d.push_str(&format!(" + dynamic offset {o}"));
@@ -237,7 +351,12 @@ fn describe(cap: &Capture, ps: &PassState, ins: &mut Inspection, dynamic_state: 
             if !ld.is_empty() {
                 detail = format!("{detail} [{ld}]");
             }
-            ins.bindings.push(BindingRow { group: group.clone(), slot: format!("@binding({binding})"), resource, detail });
+            ins.bindings.push(BindingRow {
+                group: group.clone(),
+                slot: format!("@binding({binding})"),
+                resource,
+                detail,
+            });
         }
         if !offsets.is_empty() {
             ins.bindings.push(BindingRow {
