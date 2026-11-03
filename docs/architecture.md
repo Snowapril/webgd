@@ -177,6 +177,17 @@ to 10 s for the snapshot readbacks. It then encodes `objectTable`, the setup cop
 records and the frame records with `WireWriter`. Finally it posts the bytes to the bridge as a
 transferred `Uint8Array` and returns to `IDLE`.
 
+### Page overlay
+
+The `// --- page overlay ---` section of `hook.js` adds a small status label to target pages.
+It appears once the page has a WebGL2 context or a `GPUDevice` and reads `Webgd capturable`,
+`FPS <n>` (frames counted over a 1 s window) and `Frame <n>` (rAF frames since the hook was
+installed), with a ` capturing…` suffix while a capture is in progress. Pages that only create
+WebGL1 contexts show `Webgd: WebGL1 not supported` instead. The label lives in a closed shadow
+root in the top-right corner with `pointer-events: none`, so it does not take input. The rAF
+wrapper updates it at most 4 times per second. It uses DOM APIs only, so it never appears in a
+capture.
+
 ## Transport: `bridge.js` and `port.rs`
 
 Hook and bridge exchange `window.postMessage` messages keyed by `__webgd`. Each side ignores
@@ -366,6 +377,52 @@ A single `spawn_local` loop processes requests:
 
 The loop runs while requests are pending. The `Replayer` is created once per UI session.
 
+**Geometry requests.** A request can also carry a geometry instance. The Frame Debugger submits
+one only while the Geometry tab is drawn and the selected command is a Draw. After inspection the
+loop runs `ReplayState::geometry(cap, index, instance)` on the held state and stores the result in
+`Results.geometry` as `(Key, instance, Result<GeometryData, String>)`.
+
+### Draw geometry: `webgd-replay/src/geometry.rs`
+
+`ReplayState::geometry` extracts the vertex data of the draw at the replayed point. The work is
+split over three crates:
+
+- **`webgd_core::geometry`** (pure, native tests): `Topology` (`from_gpu`, `from_gl`), `AttribFormat` decoding (`components`, `byte_size`, `kind`, `label`, `decode`), `LayoutBuffer`/`LayoutAttrib`, `decode_indices`, `draw_vertex_ids`, `fetch_vertices` and `assemble` (primitives, with primitive restart).
+- **`webgd_analysis::vsxform`**: `wgsl_vertex_to_compute(src, entry) -> VsCompute` rewrites a WGSL vertex entry into a compute entry (`@workgroup_size(64)`) in naga IR. `glsl_vertex_outputs(src)` lists the `out` varyings plus `gl_Position` of a GLSL vertex shader.
+- **`webgd-replay`**: draw arguments, layouts, buffer reads and post-VS capture on the replay device.
+
+The `vsxform` IO contract (the module doc is authoritative): all IO bindings are in bind group
+`VsCompute::io_group`, one past the highest group the module declares.
+
+- binding 0, `webgd_in: array<vec4<u32>>`: `inputs.len()` vec4 slots per record holding raw attribute bits, ordered by location.
+- binding 1, `webgd_ids: array<u32>`: the `vertex_index` of each record.
+- binding 2, `webgd_params: vec4<u32>` uniform: (record count, `instance_index`, 0, 0).
+- binding 3, `webgd_out: array<vec4<u32>>`: `outputs.len()` vec4 slots per record. The clip-space position comes first, then the `@location` outputs in location order (struct members flattened).
+
+Only 32-bit scalar/vector IO is supported. Builtins other than `vertex_index`/`instance_index`
+(inputs) and `position` (output) are rejected. `used_groups` lists the original bindings that the
+transformed code still references.
+
+**WebGPU.** Pre-VS comes from the pipeline's `vertex.buffers` layout and the vertex/index
+buffers bound in the tracked pass state, read back from the replay device. Post-VS runs the
+generated compute shader: it creates a compute pipeline, rebinds the draw's original bind groups
+that the shader uses, uploads inputs and vertex ids into the IO buffers, dispatches, and reads
+`webgd_out` back.
+
+**WebGL2.** Pre-VS comes from the bound VAO (attribute pointers, divisors, element buffer). Post-VS
+uses transform feedback. A capture program is linked from the original vertex shader, an empty
+fragment shader, the original attribute locations and `transformFeedbackVaryings` from
+`glsl_vertex_outputs`. Varyings the linker rejects are dropped and listed in a note. The capture
+draw runs with `RASTERIZER_DISCARD`. For instance > 0, per-instance attributes are fed as constant
+generic values, or the draw covers `instance + 1` instances when the shader reads
+`gl_InstanceID`. The current program, draw framebuffer, `RASTERIZER_DISCARD`, transform feedback
+object and buffer binding, and the generic attribute values are saved first and restored after.
+Pending GL errors are drained before the capture so its error check sees only its own errors.
+
+**Limits.** `executeBundles` and multi-draw calls are not supported. GL draws with a base
+instance other than 0 are not supported either. If post-VS capture fails, the reason is returned
+and the Geometry tab shows it as the tooltip of the disabled Post-VS toggle.
+
 ## Revision history: `webgd-core/src/track/revisions.rs`
 
 `revisions::all(cap) -> HashMap<ObjId, Vec<Revision>>` lists, per resource, every call that
@@ -414,8 +471,13 @@ bottom status bar, and the dock area. There are two workspaces, `Workspace::Fram
 - `trace: Option<Rc<TraceResult>>`: the latest trace for the loaded capture, used by the Events GPU Duration column and the scrubber widths.
 - `workspace`, `status`, `port`, `inbox`, `replay`.
 
-`widgets.rs` holds shared colors and small widgets. Panels live in `panels/` (one module per
-`Tab`):
+`widgets.rs` holds shared colors and small widgets. Event colours come from three helpers:
+
+- `event_color(kind, ordinal)` gives each action a distinct hue. The hue steps by the golden angle per action ordinal, and `panels/scrubber.rs::action_ordinals` numbers the actions. The Scrubber blocks and the GPU Trace `Items` bars both use it, so an action has the same colour in both.
+- `kind_color(kind)` colours the 3 px strip that marks the command kind on each block or bar. Adjacent blocks and bars are separated by 1 px.
+- `text_on(bg)` picks a label colour with enough contrast against the background.
+
+Panels live in `panels/` (one module per `Tab`):
 
 | Module | Tab |
 |---|---|
@@ -424,6 +486,7 @@ bottom status bar, and the dock area. There are two workspaces, `Workspace::Fram
 | `scrubber.rs` | Scrubber: horizontal action strip |
 | `inspect.rs` | Render Targets and API Inspector |
 | `resources.rs` | Resources table |
+| `geometry.rs` | Geometry: pre/post-VS viewport and vertex table (Frame Debugger centre group) |
 | `viewer.rs` | Resource Viewer, including the Revisions panel |
 | `trace.rs` | GPU Trace timeline and range summary |
 | `log.rs` | Log |
@@ -616,6 +679,7 @@ cannot be read back.
 - Chrome quantizes WebGPU timestamps (about 65 µs) unless `chrome://flags/#enable-webgpu-developer-features` is enabled.
 - WebGPU occlusion results in Chrome are 0/1 visibility flags, so `Fragments (post-depth)` is 0 or 1.
 - Passes with render bundles or occlusion queries are timed as a whole.
+- Geometry: `executeBundles` and multi-draw calls are not supported, and neither are GL draws with a base instance other than 0.
 - Independent WebGPU passes can show overlapping timestamps, because the GPU may run them concurrently.
 - Not captured:
   - pre-frame depth/stencil contents (`depth24plus` is also not viewable)

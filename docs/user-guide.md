@@ -48,7 +48,19 @@ From left to right: the capture source (hover for the full URL), the current pos
 | Up / Down | Move the selection in Events |
 | Left / Right | Step to the previous / next action in the Scrubber |
 | ctrl+wheel, drag, F | Zoom, pan, fit in GPU Trace (ctrl+wheel and drag also zoom/pan the Resource Viewer texture) |
+| drag, shift/right-drag, wheel, double-click | Orbit, pan, zoom, fit in the Geometry view |
 | shift+drag, Esc | Select / clear a time range in GPU Trace |
+
+## Page overlay
+
+On a page that has a WebGL2 context or a GPUDevice, the extension shows a small read-only box in the top-right corner:
+
+- `Webgd capturable`: webgd hooked the page and can capture it.
+- `FPS <n>`: frames per second, measured over a 1 s window.
+- `Frame <n>`: `requestAnimationFrame` frames since the hook was installed.
+- ` capturing…` is appended while a capture is in progress.
+
+Pages with only WebGL1 contexts show `Webgd: WebGL1 not supported` instead. The overlay lives in a closed shadow root, ignores the mouse (pointer-events none), updates at most 4 times per second from the `requestAnimationFrame` wrapper, and never appears in captures.
 
 ## Capture panel
 
@@ -83,6 +95,33 @@ A horizontal strip with one cell per action (draw, dispatch, clear, copy, submit
 
 - Click or drag to select an action; Left/Right step between actions.
 - Hover shows `#i  label` with the kind and GPU duration, or for a band its range `#a–#b · N actions` and GPU time.
+- Each action has its own colour (hues spread by the golden angle over the action order), so neighbouring blocks are easy to tell apart. The same action has the same colour in the GPU Trace `Items` row. A 3 px strip along each block shows its kind (draw, dispatch, clear, copy, submit), 1 px gaps separate blocks, and label text switches between dark and light for contrast.
+
+## Geometry
+
+A tab in the Frame Debugger centre group that shows the vertices of the selected draw. With no draw selected it shows "Select a draw call to view its geometry." Geometry is extracted only while the tab is visible, by replaying to the draw ("extracting geometry of #i…").
+
+Toolbar:
+- **Pre-VS**: vertex shader inputs fetched from the bound vertex buffers. WebGPU: from the pipeline's `vertex.buffers` layout and the bound vertex/index buffers. WebGL2: from the bound vertex array object.
+- **Post-VS**: vertex shader outputs computed on the replay device. WebGPU runs the vertex entry point as a compute shader; WebGL2 uses transform feedback. When outputs are unavailable the button is disabled and its tooltip gives the reason.
+- **Wireframe** / **Solid** / **Points**. In Solid mode, **Tint back faces** colours back faces (assumes counter-clockwise front faces).
+- Pre-VS: **Position** combo picks the input used as position (inputs with at least 2 components). Post-VS: `Position: <output>` shows the position output, and **Clip space (no divide)** shows raw clip-space positions instead of NDC (clip ÷ w).
+- **Instance**: which instance to show, for instanced draws.
+- **Reset view**: fit the camera to the geometry (double-clicking the view does the same).
+
+A summary line shows topology, `N vertices in draw order · N unique · N primitives` and `instance i of n` for instanced draws.
+
+The view labels its space (`attribute space`, `NDC (clip ÷ w)` or `clip space`). In NDC it draws the clip volume box: x, y in [-1, 1], z in [0, 1] for WebGPU or [-1, 1] for WebGL2. Vertices with clip w ≤ 0 are not drawn in NDC; a banner counts them and suggests "Clip space (no divide)". Drag orbits, shift/right-drag pans, wheel zooms, double-click fits. Hover a vertex for its values (`VTX n`); click selects it and scrolls the table to it.
+
+Vertex table (below the view, resizable), one row per vertex in draw order:
+- `IDX`: position in draw order. `VTX`: vertex id (index value + base vertex); primitive restart rows show `restart`.
+- Pre-VS columns are grouped by layout slot: `Slot n · stride s · per-vertex|per-instance · Buffer#id` (the buffer links to the Resource Viewer; `no buffer` if unbound), with one `@location name format` column per attribute. Inputs not fed by a layout buffer go to `Other inputs`.
+- Post-VS has one group `Vertex shader outputs · instance n`.
+- Click a row to select that vertex in the view.
+
+Messages: "No vertex input with at least 2 components to use as position.", "The vertex shader outputs carry no position.", "No drawable vertex positions.", and `geometry unavailable: …` when extraction fails.
+
+Limits: `executeBundles` and multi-draw calls are not supported; WebGL2 draws with a base instance other than 0 are not supported. Post-VS failures appear as the disabled **Post-VS** reason.
 
 ## Render Targets
 
@@ -184,7 +223,7 @@ The **Revisions** side panel (toggle it with the **Revisions** button at the rig
 **Run trace** replays the whole frame 5 times with instrumentation and keeps the run with the median total GPU time. Notes from the run are listed above the timeline. Afterwards the Events **GPU Duration** column and the Scrubber widths use the result.
 
 Rows, on one shared time axis with an adaptive ruler:
-- One collapsible group per queue (`Queue (GPUDevice#id)` or `GL context #id`, with `(N items)`): a pass row, marker rows (`Markers`, `Markers · level d`) and an `Items` row with one bar per draw, dispatch or clear. Click a group header to collapse it.
+- One collapsible group per queue (`Queue (GPUDevice#id)` or `GL context #id`, with `(N items)`): a pass row, marker rows (`Markers`, `Markers · level d`) and an `Items` row with one bar per draw, dispatch or clear. Click a group header to collapse it. Item bars use the same per-action colours as the Scrubber, with a 3 px kind strip and 1 px separators.
 - A collapsible `Counters (est.)` group: step graphs normalized to the track maximum (printed in the label as `max …`).
 
 Controls (also listed above the timeline):

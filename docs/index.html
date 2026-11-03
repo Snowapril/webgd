@@ -64,6 +64,8 @@ footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:v
 <div class="card"><h3>Resource browser</h3><p>Resources table with Origin, Revisions and Last write columns. Texture viewer (mip/layer, channels, range/Auto, zoom/pan, texel readout), buffer viewer (hex/u8/u16/u32/i32/f32/f16), shaders, programs, descriptor trees, and a per-resource revision history.</p></div>
 <div class="card"><h3>GPU trace</h3><p>Timeline with collapsible queue groups and a counters group (Occupancy, ALU, Branches, Texture samples, all "(est.)", and Fragments), crosshair, adaptive ruler and range selection with a Range summary.</p></div>
 <div class="card"><h3>Save / open</h3><p><code>.webgd</code> files are the raw wire bytes. A standalone mode opens them without the extension.</p></div>
+<div class="card"><h3>Geometry tab</h3><p>Pre-VS / Post-VS view of the selected draw (Wireframe / Solid / Points, position source, <code>Clip space (no divide)</code>, instance selector, orbit/pan/zoom, double-click fit, NDC clip box) with a vertex table grouped by layout slot. WebGPU post-VS runs the vertex entry as a compute shader; WebGL2 uses transform feedback. executeBundles, multiDraw and GL base instance ≠ 0 are unsupported; failures appear as the Post-VS disabled reason.</p></div>
+<div class="card"><h3>Page overlay and event colours</h3><p>Pages with a WebGL2 context or GPUDevice show <code>Webgd capturable</code>, FPS, frame count and <code>capturing…</code> in a click-through top-right overlay (WebGL1-only pages: <code>Webgd: WebGL1 not supported</code>); it is never recorded. Each action gets a distinct golden-angle hue, shared by Scrubber blocks and Trace Items bars, with a 3 px kind strip.</p></div>
 </div>
 
 <h2 id="architecture">Architecture</h2>
@@ -126,13 +128,14 @@ footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:v
 <div class="step"><h3>Step 6: Resource browser</h3><p><code>crates/webgd-core/src/track/resources.rs</code>, <code>panels/resources.rs</code>, <code>panels/viewer.rs</code>.</p></div>
 <div class="step"><h3>Step 7: GPU trace and estimated counters</h3><p><code>crates/webgd-analysis/src/{wgsl,glsl,model}.rs</code>, <code>crates/webgd-replay/src/trace.rs</code>, <code>panels/trace.rs</code>.</p></div>
 <div class="step"><h3>Step 8: UI overhaul and revision history</h3><p><code>crates/webgd-core/src/track/revisions.rs</code>, <code>crates/webgd-core/tests/revisions.rs</code>, <code>crates/webgd-ui/src/panels/scrubber.rs</code>; rewritten <code>crates/webgd-ui/src/{app,state,widgets}.rs</code> and <code>panels/{commands,inspect,resources,viewer,trace,log,capture}.rs</code>; frame-start replay (<code>replay_to_frame_start</code>, <code>ReplayState.frame_start</code>) in <code>crates/webgd-replay/src/lib.rs</code>.</p></div>
+<div class="step"><h3>Step 9: Page overlay, event colours, Geometry tab</h3><p><code>extension/hook.js</code> (<code>// --- page overlay ---</code> section); <code>crates/webgd-ui/src/widgets.rs</code> (<code>event_color</code>, <code>kind_color</code>, <code>text_on</code>), <code>panels/scrubber.rs</code> (<code>action_ordinals</code>), <code>panels/trace.rs</code>; <code>crates/webgd-core/src/geometry.rs</code> + <code>tests/geometry.rs</code>; <code>crates/webgd-analysis/src/vsxform.rs</code> + <code>tests/vsxform.rs</code>; <code>crates/webgd-replay/src/geometry.rs</code>; <code>crates/webgd-ui/src/panels/geometry.rs</code>.</p></div>
 </div>
 
 <h2 id="verification">Verification results</h2>
 <table>
 <thead><tr><th>Check</th><th>Result</th></tr></thead>
 <tbody>
-<tr><td><code>cargo test</code></td><td class="ok">39 tests pass (analysis 16; core 23: wire 3, pixels 7, revisions 7, track 6)</td></tr>
+<tr><td><code>cargo test</code></td><td class="ok">59 tests pass (core 36: wire 3, pixels 7, revisions 7, track 6, geometry 13; analysis 23: stats 16, vsxform 7)</td></tr>
 <tr><td><code>cargo clippy -p webgd-replay -p webgd-ui --target wasm32-unknown-unknown</code></td><td class="ok">clean (all crates)</td></tr>
 <tr><td><code>node tools/gen-wire-fixture.cjs &amp;&amp; git diff --exit-code tests/fixtures/sample.wire</code></td><td class="ok">byte-identical</td></tr>
 <tr><td><code>cargo xtask build</code></td><td class="ok">index.html, main.js, webgd_ui.js, webgd_ui_bg.wasm</td></tr>
@@ -141,6 +144,10 @@ footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:v
 <tr><td>Stop inside pass (setPipeline before draw)</td><td class="ok">clear color only</td></tr>
 <tr><td>WebGL2 trace</td><td class="ok">sequential layout; <code>Fragments (rasterized, pre-depth)</code> up to 307200</td></tr>
 <tr><td>WebGPU trace (<code>--enable-webgpu-developer-features</code>)</td><td class="ok">real pass bars, non-zero ALU/occupancy</td></tr>
+<tr><td>Page overlay (both fixture pages)</td><td class="ok"><code>Webgd capturable</code>, FPS and frame counter shown top-right</td></tr>
+<tr><td>WebGPU Geometry (drawIndexed)</td><td class="ok">36 vertices, 24 unique, 12 primitives; pre-VS float32x3/float32x2 table; post-VS position f32x4 + uv</td></tr>
+<tr><td>WebGL2 Geometry (drawElements)</td><td class="ok">pre-VS <code>aPos</code>/<code>aUv</code>; post-VS <code>gl_Position</code> + <code>vUv</code></td></tr>
+<tr><td>Event colours</td><td class="ok">Scrubber blocks and Trace Items bars distinct per action, matching across panels</td></tr>
 </tbody>
 </table>
 

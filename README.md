@@ -5,9 +5,12 @@ webgd is a frame debugger for web pages that render with WebGL2 or WebGPU. It ru
 ## Features
 
 - **Frame capture.** Records every WebGL2/WebGPU call in one rAF frame. Pre-frame state comes from a snapshot taken at the start of that frame.
+- **Page overlay.** On pages with a WebGL2 context or a `GPUDevice`, a small top-right overlay shows `Webgd capturable`, `FPS <n>` (1 s window) and `Frame <n>` (rAF frames since install), with ` capturing…` appended while a capture runs. WebGL1-only pages show `Webgd: WebGL1 not supported`. The overlay lives in a closed shadow root, ignores pointer events, updates at most 4 times a second and is not recorded in captures.
 - **Workspaces.** A top menu bar holds File (Open .webgd…, Save .webgd; Ctrl/Cmd+O), Capture (Refresh targets, Show Capture panel, one Capture entry per live target) and Window (focus any tab), plus a switch between the **Frame Debugger** and **GPU Trace** workspaces, each with its own dock layout. A bottom status bar shows the source URL, the current position, replay status and an error count that opens the Log.
 - **Events and Scrubber.** The **Events** panel lists calls grouped by render/compute passes, debug groups and page markers, with `#`, a kind color strip, the event label and GPU duration after a trace. It offers `Actions only`, Collapse/Expand all, a text filter and a selectable `Pre-frame setup (N calls)` group. The **Scrubber** shows the frame's actions as a horizontal strip (widths follow GPU duration after a trace) with marker bands; click or drag to select, Left/Right to step, Home/End for first/last event.
+- **Distinct event colours.** Each action gets its own colour (golden-angle hue per action ordinal), shared by its **Scrubber** block and its GPU Trace **Items** bar. A 3 px strip shows the event kind, 1 px separators split neighbouring blocks, and labels switch between dark and light text for contrast.
 - **Inspection.** Selecting a command replays the frame up to that command on webgd's own device. **Render Targets** shows a thumbnail strip and a large preview (Fit / 1:1, texel readout, Open in Resource Viewer). The **API Inspector** walks the pipeline stage by stage (Input Assembly, Vertex Shader, Rasterizer, Fragment Shader, Depth/Stencil, Color Output, or Compute Shader / Dispatch, plus All state) with links to the bound resources.
+- **Geometry.** The **Geometry** tab (Frame Debugger centre group) shows the selected draw's vertices in 3D: a `Pre-VS` / `Post-VS` toggle (Post-VS is disabled with a tooltip giving the reason when unavailable), `Wireframe` / `Solid` / `Points`, a position source combo, a `Clip space (no divide)` option, an instance selector and `Reset view`. Drag orbits, pans and zooms; double-click fits; Post-VS draws the NDC clip box. Below it, a vertex table is grouped by layout slot (`Slot n · stride s · per-vertex|per-instance · Buffer#id`, with IDX/VTX and `@location name format` columns); Post-VS shows `Vertex shader outputs · instance n`. WebGPU post-VS data comes from running the vertex entry point as a compute shader; WebGL2 uses transform feedback.
 - **Resource browser.** **Resources** lists every buffer, texture, shader, program, pipeline, sampler, bind group and so on, with origin, revision count and last write (`Written in frame` narrows the list; double-click selects the last write). The **Resource Viewer** shows:
   - textures: mip/layer selection, channel toggles, a value range with `Auto`, zoom/pan and a texel readout
   - buffers: hex, u8, u16, u32, i32, f32 or f16
@@ -66,6 +69,7 @@ python3 -m http.server 8000 --directory tests/pages
 ```
 
 1. Open `http://localhost:8000/webgpu.html` or `http://localhost:8000/webgl2.html` in a visible tab.
+   The page shows a top-right `Webgd capturable` overlay with FPS and frame counters once it has a WebGL2 context or `GPUDevice`. No overlay means the extension is not hooked in (reload the page); `Webgd: WebGL1 not supported` means the page can't be captured.
 2. Click the webgd toolbar action. The webgd UI opens in a new tab.
 3. Open the **Capture** menu and pick the target's entry (or use **Capture** in the Capture panel).
 4. Select an event in **Events** or the **Scrubber** to see it in **Render Targets** and the **API Inspector**. Browse resources in **Resources** and their history in the **Resource Viewer**, or switch to the **GPU Trace** workspace and click **Run trace**.
@@ -115,6 +119,7 @@ The fixture check confirms that the JS encoder in `hook.js` and the Rust decoder
 - WebGPU occlusion results in Chrome are 0/1 visibility flags, so `Fragments (post-depth)` is 0 or 1.
 - `depth24plus` textures cannot be viewed. Pre-frame depth/stencil and MSAA contents are not captured; such resources show a banner.
 - WebGL1 is detected but not supported. Workers and OffscreenCanvas in workers are not supported.
+- Geometry: `executeBundles` and multi-draw calls are not supported, and WebGL2 draws with a base instance other than 0 are not supported. Failures show up as the Post-VS disabled reason.
 - Capture needs a visible tab driven by `requestAnimationFrame`. Otherwise it fails with `target does not render with requestAnimationFrame`.
 
 [docs/user-guide.md](docs/user-guide.md) has the full list.
