@@ -463,6 +463,7 @@
 
     function postStatus() {
       post({ __webgd: 'to-bridge', type: 'status', gl2: status.gl2, webgl1: status.webgl1, gpuDevices: status.gpuDevices }, '*');
+      try { overlayRender(); } catch (e) { internalError(e); }
     }
     function sendError(message) {
       post({ __webgd: 'to-bridge', type: 'captureError', message: String(message) }, '*');
@@ -1356,11 +1357,102 @@
       }, 2000);
     }
 
+    // --- page overlay ----------------------------------------------------------------------------------
+    // Small "capturable" badge with FPS / frame counters. Built only with DOM originals captured here,
+    // lives in a closed shadow root, never touches canvases or GPU objects and never records anything.
+    // Updated from the rAF wrapper below (throttled to ~4 Hz) and on status changes; no own timers/loops.
+    const OV_INTERVAL_MS = 250;
+    const OV_WINDOW_MS = 1000;
+    const ovDom = {
+      createElement: Document.prototype.createElement,
+      attachShadow: Element.prototype.attachShadow,
+      appendChild: Node.prototype.appendChild,
+      setAttribute: Element.prototype.setAttribute,
+      setText: Object.getOwnPropertyDescriptor(Node.prototype, 'textContent').set,
+      isConnected: Object.getOwnPropertyDescriptor(Node.prototype, 'isConnected').get,
+      documentElement: Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get,
+    };
+    const OV_HOST_STYLE = 'all: initial !important; display: block !important; position: fixed !important; '
+      + 'top: 8px !important; right: 8px !important; z-index: 2147483647 !important; pointer-events: none !important; '
+      + 'margin: 0 !important; padding: 0 !important; border: 0 !important; width: auto !important; height: auto !important; '
+      + 'transform: none !important; opacity: 1 !important; visibility: visible !important;';
+    const OV_BOX_STYLE = 'margin: 0; padding: 4px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.65); '
+      + 'color: #e6e6e6; font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre; '
+      + 'pointer-events: none; user-select: none;';
+    let ovHost = null;
+    let ovBox = null;
+    let ovText = '';
+    let ovLastRender = -Infinity;
+    let ovFrames = 0;
+    let ovLastTs = -1;
+    const ovTimes = [];
+    let ovTimesHead = 0;
+
+    function ovHeadline() {
+      if (status.gl2 > 0 || status.gpuDevices > 0) return 'Webgd capturable';
+      if (status.webgl1 > 0) return 'Webgd: WebGL1 not supported';
+      return null;
+    }
+
+    function ovFps() {
+      const n = ovTimes.length - ovTimesHead;
+      if (n < 2) return '--';
+      const span = ovTimes[ovTimes.length - 1] - ovTimes[ovTimesHead];
+      return span > 0 ? String(Math.round(((n - 1) * 1000) / span)) : '--';
+    }
+
+    // Ensures the host is attached to the current document element; returns false when not possible yet
+    // (document_start before <html> exists).
+    function ovEnsureHost() {
+      const root = ovDom.documentElement.call(document);
+      if (!root) return false;
+      if (!ovHost) {
+        const host = ovDom.createElement.call(document, 'div');
+        ovDom.setAttribute.call(host, 'style', OV_HOST_STYLE);
+        const shadow = ovDom.attachShadow.call(host, { mode: 'closed' });
+        const box = ovDom.createElement.call(document, 'div');
+        ovDom.setAttribute.call(box, 'style', OV_BOX_STYLE);
+        ovDom.appendChild.call(shadow, box);
+        ovHost = host;
+        ovBox = box;
+        ovText = '';
+      }
+      if (!ovDom.isConnected.call(ovHost)) ovDom.appendChild.call(root, ovHost);
+      return true;
+    }
+
+    function overlayRender() {
+      const head = ovHeadline();
+      if (head === null) return;
+      if (!ovEnsureHost()) return;
+      const busy = mode !== IDLE ? ' capturing\u2026' : '';
+      const text = head + busy + '\nFPS ' + ovFps() + '\nFrame ' + ovFrames;
+      if (text !== ovText) {
+        ovDom.setText.call(ovBox, text);
+        ovText = text;
+      }
+    }
+
+    // Called once per rAF callback; several callbacks in one frame share a timestamp.
+    function overlayTick(ts) {
+      if (ts === ovLastTs) return;
+      const capturingChanged = (mode !== IDLE) !== ovText.includes('capturing\u2026');
+      ovLastTs = ts;
+      ovFrames++;
+      ovTimes.push(ts);
+      while (ovTimesHead < ovTimes.length && ovTimes[ovTimesHead] < ts - OV_WINDOW_MS) ovTimesHead++;
+      if (ovTimesHead > 512) { ovTimes.splice(0, ovTimesHead); ovTimesHead = 0; }
+      if (!capturingChanged && ts - ovLastRender < OV_INTERVAL_MS && ts >= ovLastRender) return;
+      ovLastRender = ts;
+      overlayRender();
+    }
+
     const origRAF = window.requestAnimationFrame;
     window.requestAnimationFrame = function requestAnimationFrame(cb) {
       if (typeof cb !== 'function') return origRAF.call(this, cb);
       return origRAF.call(this, function (ts) {
         try { onFrame(ts); } catch (e) { internalError(e); }
+        try { overlayTick(ts); } catch (e) { internalError(e); }
         return cb.call(this, ts);
       });
     };
