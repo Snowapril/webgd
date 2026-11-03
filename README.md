@@ -1,5 +1,7 @@
 # webgd
 
+Project page: https://snowapril.github.io/webgd/
+
 webgd is a frame debugger for web pages that render with WebGL2 or WebGPU. It runs inside the same Chrome instance as the target page. A Chrome MV3 extension records every graphics API call made during one `requestAnimationFrame` frame, along with the GPU resource contents at the start of that frame. A Rust/WASM UI built on egui then replays the frame on its own device, so you can inspect the state at any command, browse resources and look at a GPU timeline. Apart from three small extension scripts, all of it is written in Rust.
 
 ## Features
@@ -130,7 +132,8 @@ The fixture check confirms that the JS encoder in `hook.js` and the Rust decoder
 - [docs/wire-format.md](docs/wire-format.md): capture byte format (`.webgd` files)
 - [docs/user-guide.md](docs/user-guide.md): installing, capturing, panels, limitations
 - [docs/development.md](docs/development.md): toolchain, building, testing, fixtures
-- [docs/index.html](docs/index.html): project report
+- [docs/report.html](docs/report.html): project report
+- [snowapril.github.io/webgd](https://snowapril.github.io/webgd/): project landing page (`docs/index.html`)
 
 ## License
 

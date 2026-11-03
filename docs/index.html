@@ -3,188 +3,196 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>webgd: in-browser WebGL2/WebGPU frame debugger</title>
+<meta name="color-scheme" content="light dark">
+<title>webgd: in-browser frame debugger for WebGL2 and WebGPU</title>
+<meta name="description" content="webgd is an in-browser frame debugger and GPU trace for WebGL2 and WebGPU pages. A Chrome extension captures one frame and replays it locally so you can inspect every command, resource and render target.">
+<link rel="canonical" href="https://snowapril.github.io/webgd/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="webgd">
+<meta property="og:title" content="webgd: in-browser frame debugger for WebGL2 and WebGPU">
+<meta property="og:description" content="Capture one frame of a WebGL2 or WebGPU page, replay it up to any command, inspect render targets, pipeline state, geometry and resources, and view a GPU trace.">
+<meta property="og:url" content="https://snowapril.github.io/webgd/">
+<meta property="og:image" content="https://snowapril.github.io/webgd/assets/frame-debugger.jpg">
+<meta property="og:image:alt" content="webgd Frame Debugger with a draw call selected">
+<meta name="twitter:card" content="summary_large_image">
 <style>
-:root{--bg:#fbfbfa;--fg:#1d1f21;--muted:#5c6066;--card:#fff;--line:#d9dbde;--accent:#2457c5;--accent2:#0f7b6c;--warn:#a15c00;--code:#f1f2f4;--box:#eef3fc;--box2:#e9f6f2;--box3:#f8f1e6}
-@media (prefers-color-scheme:dark){:root{--bg:#141618;--fg:#e4e6e8;--muted:#9aa0a6;--card:#1c1f22;--line:#33373c;--accent:#7aa2f7;--accent2:#5fd3bc;--warn:#e0a85c;--code:#22262a;--box:#1d2a40;--box2:#173430;--box3:#3a2e1c}}
+:root{--bg:#fbfbfa;--fg:#1d1f21;--muted:#545960;--card:#fff;--line:#d9dbde;--accent:#2457c5;--accent-fg:#fff;--accent-hover:#1b4499;--soft:#eef3fc;--disabled-bg:#e6e8eb;--disabled-fg:#45494f;--focus:#c2410c}
+@media (prefers-color-scheme:dark){:root{--bg:#141618;--fg:#e4e6e8;--muted:#a3a9b0;--card:#1c1f22;--line:#33373c;--accent:#7aa2f7;--accent-fg:#0d1526;--accent-hover:#9bbaf9;--soft:#1d2a40;--disabled-bg:#2a2e33;--disabled-fg:#c3c7cc;--focus:#fbbf24}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:1040px;margin:0 auto;padding:0 20px 48px}
-header.hero{padding:56px 0 28px;border-bottom:1px solid var(--line)}
-h1{font-size:2.4rem;margin:0 0 8px}
-h2{margin:44px 0 12px;font-size:1.5rem;border-bottom:1px solid var(--line);padding-bottom:6px}
-h3{margin:0 0 6px;font-size:1.05rem}
-p.lead{font-size:1.15rem;color:var(--muted);max-width:760px}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 a{color:var(--accent)}
-nav a{margin-right:14px;font-size:.95rem}
-code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em}
-code{background:var(--code);padding:1px 5px;border-radius:4px}
-pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.45}
-pre code{background:none;padding:0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-.card p{margin:0;color:var(--muted);font-size:.93rem}
-svg{width:100%;height:auto;display:block}
-svg text{fill:var(--fg);font:13px system-ui,sans-serif}
-svg .sub{fill:var(--muted);font-size:11px}
-svg .b1{fill:var(--box);stroke:var(--accent)}
-svg .b2{fill:var(--box2);stroke:var(--accent2)}
-svg .b3{fill:var(--box3);stroke:var(--warn)}
-svg .grp{fill:none;stroke:var(--line);stroke-dasharray:5 4}
-svg .ln{stroke:var(--muted);stroke-width:1.5;fill:none;marker-end:url(#arr)}
-svg #arr path{fill:var(--muted)}
-ol.pipe{counter-reset:s;list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
-ol.pipe li{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:8px;padding:12px}
-ol.pipe li::before{counter-increment:s;content:counter(s) ". ";font-weight:600;color:var(--accent)}
-.timeline{border-left:2px solid var(--accent);margin-left:8px;padding-left:22px}
-.step{position:relative;margin-bottom:18px}
-.step::before{content:"";position:absolute;left:-29px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--accent)}
-.step p{margin:2px 0;color:var(--muted)}
-table{border-collapse:collapse;width:100%;font-size:.93rem}
-th,td{text-align:left;border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top}
-th{color:var(--muted);font-weight:600}
-.ok{color:var(--accent2);font-weight:600}
-ul.lim li{margin-bottom:5px}
-footer{border-top:1px solid var(--line);margin-top:48px;padding-top:16px;color:var(--muted);font-size:.9rem}
+a:hover{color:var(--accent-hover)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:4px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;background:var(--soft);padding:1px 5px;border-radius:4px}
+.skip{position:absolute;left:-9999px;top:0;background:var(--card);color:var(--fg);padding:8px 12px;z-index:10}
+.skip:focus{left:12px;top:12px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+.topbar{border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding-top:12px;padding-bottom:12px}
+.brand{font-weight:700;font-size:1.1rem;color:var(--fg);text-decoration:none;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.topbar nav ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 16px}
+.topbar nav a{font-size:.95rem}
+.hero{padding:48px 0 32px}
+.hero h1{font-size:2.6rem;line-height:1.1;margin:0 0 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:-.02em}
+.pitch{font-size:1.2rem;margin:0 0 24px;max-width:720px}
+.actions{display:flex;flex-direction:column;gap:10px;max-width:360px}
+.btn{display:inline-block;text-align:center;padding:11px 18px;border-radius:8px;font-weight:600;text-decoration:none;border:1px solid var(--accent);line-height:1.3}
+.btn.secondary{color:var(--accent);background:transparent}
+.btn.secondary:hover{background:var(--soft)}
+.btn.primary{background:var(--accent);color:var(--accent-fg)}
+.btn[aria-disabled="true"]{background:var(--disabled-bg);color:var(--disabled-fg);border-color:var(--line);cursor:not-allowed}
+.btn-note{font-size:.9rem;color:var(--muted);margin:10px 0 0}
+section{padding:32px 0;border-top:1px solid var(--line)}
+h2{font-size:1.6rem;margin:0 0 16px}
+h3{font-size:1.05rem;margin:0 0 6px}
+.intro p{max-width:760px;margin:0 0 12px}
+.features{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr;gap:14px}
+.features li{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:10px;padding:16px}
+.features p{margin:0;color:var(--muted);font-size:.95rem}
+.gallery-lead{color:var(--muted);margin:-6px 0 18px}
+.gallery{display:grid;grid-template-columns:1fr;gap:20px}
+figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+figure a{display:block;background:var(--soft)}
+figure img{display:block;width:100%;height:auto;min-height:120px}
+figcaption{padding:10px 14px;font-size:.93rem;color:var(--muted)}
+figcaption strong{color:var(--fg)}
+ol.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr;gap:14px;counter-reset:s}
+ol.steps li{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 16px 16px 60px;position:relative}
+ol.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:16px;top:14px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-fg);font-weight:700;display:flex;align-items:center;justify-content:center}
+ol.steps p{margin:0;color:var(--muted);font-size:.95rem}
+.status{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0}
+footer{border-top:1px solid var(--line);padding:24px 0 40px;color:var(--muted);font-size:.92rem}
+footer ul{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px}
+footer p{margin:0}
+@media (min-width:600px){
+.actions{flex-direction:row;flex-wrap:wrap;max-width:none}
+.features{grid-template-columns:repeat(2,1fr)}
+ol.steps{grid-template-columns:repeat(2,1fr)}
+}
+@media (min-width:860px){
+.hero{padding:72px 0 48px}
+.hero h1{font-size:3.4rem}
+.features{grid-template-columns:repeat(3,1fr)}
+.gallery{grid-template-columns:repeat(2,1fr)}
+.gallery figure.wide{grid-column:1 / -1}
+ol.steps{grid-template-columns:repeat(4,1fr)}
+}
+@media (prefers-reduced-motion:no-preference){.btn{transition:background-color .15s}}
 </style>
 </head>
 <body>
-<main>
-<header class="hero">
-<h1>webgd</h1>
-<p class="lead">An in-browser frame debugger for web pages that use WebGL2 or WebGPU. It is a Chrome MV3 extension plus a Rust/WASM egui UI. It captures one frame, replays it on webgd's own device up to any command, and shows render targets, pipeline state, bindings, resource contents and an estimated GPU trace.</p>
-<nav><a href="../README.md">README</a><a href="architecture.md">Architecture</a><a href="wire-format.md">Wire format</a><a href="user-guide.md">User guide</a><a href="development.md">Development</a><a href="../LICENSE">License</a></nav>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+<div class="wrap">
+<a class="brand" href="./">webgd</a>
+<nav aria-label="Primary">
+<ul>
+<li><a href="#features">Features</a></li>
+<li><a href="#gallery">Screenshots</a></li>
+<li><a href="#how">How it works</a></li>
+<li><a href="report.html">Docs</a></li>
+<li><a href="https://github.com/Snowapril/webgd">GitHub</a></li>
+</ul>
+</nav>
+</div>
 </header>
 
-<h2 id="features">Features</h2>
-<div class="grid">
-<div class="card"><h3>Frame capture</h3><p>Every WebGL2/WebGPU call in one <code>requestAnimationFrame</code> frame, plus a frame-start snapshot of resource contents and state.</p></div>
-<div class="card"><h3>Events and scrubber</h3><p>Events panel with <code>#</code>, kind strip, label and GPU Duration columns, <code>Actions only</code>, collapse/expand, filter and a selectable <code>Pre-frame setup</code> group. A scrubber strip of actions sized by GPU duration after a trace.</p></div>
-<div class="card"><h3>API Inspector</h3><p>Selecting an event replays to it. Stage list (Input Assembly, Vertex Shader, Rasterizer, Fragment Shader, Depth/Stencil, Color Output, or Compute Shader / Dispatch) with resource links, plus Render Targets with thumbnails and a large preview.</p></div>
-<div class="card"><h3>Resource browser</h3><p>Resources table with Origin, Revisions and Last write columns. Texture viewer (mip/layer, channels, range/Auto, zoom/pan, texel readout), buffer viewer (hex/u8/u16/u32/i32/f32/f16), shaders, programs, descriptor trees, and a per-resource revision history.</p></div>
-<div class="card"><h3>GPU trace</h3><p>Timeline with collapsible queue groups and a counters group (Occupancy, ALU, Branches, Texture samples, all "(est.)", and Fragments), crosshair, adaptive ruler and range selection with a Range summary.</p></div>
-<div class="card"><h3>Save / open</h3><p><code>.webgd</code> files are the raw wire bytes. A standalone mode opens them without the extension.</p></div>
-<div class="card"><h3>Geometry tab</h3><p>Pre-VS / Post-VS view of the selected draw (Wireframe / Solid / Points, position source, <code>Clip space (no divide)</code>, instance selector, orbit/pan/zoom, double-click fit, NDC clip box) with a vertex table grouped by layout slot. WebGPU post-VS runs the vertex entry as a compute shader; WebGL2 uses transform feedback. executeBundles, multiDraw and GL base instance ≠ 0 are unsupported; failures appear as the Post-VS disabled reason.</p></div>
-<div class="card"><h3>Page overlay and event colours</h3><p>Pages with a WebGL2 context or GPUDevice show <code>Webgd capturable</code>, FPS, frame count and <code>capturing…</code> in a click-through top-right overlay (WebGL1-only pages: <code>Webgd: WebGL1 not supported</code>); it is never recorded. Each action gets a distinct golden-angle hue, shared by Scrubber blocks and Trace Items bars, with a 3 px kind strip.</p></div>
+<main id="main">
+<div class="hero">
+<div class="wrap">
+<h1>webgd</h1>
+<p class="pitch">An in-browser frame debugger and GPU trace for web pages that render with WebGL2 or WebGPU.</p>
+<div class="actions">
+<a class="btn primary" role="link" aria-disabled="true" tabindex="0" title="Chrome Web Store listing is not ready yet" aria-describedby="store-note">Add to Chrome — coming soon</a>
+<a class="btn secondary" href="https://github.com/Snowapril/webgd">View on GitHub</a>
+<a class="btn secondary" href="report.html">Read the docs</a>
+</div>
+<p class="btn-note" id="store-note">Chrome Web Store listing is not ready yet. Until then, build from source and load the extension unpacked.</p>
+</div>
 </div>
 
-<h2 id="architecture">Architecture</h2>
-<svg viewBox="0 0 960 420" role="img" aria-label="webgd architecture diagram">
-<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z"/></marker></defs>
-<rect class="grp" x="10" y="20" width="330" height="380" rx="10"/>
-<text x="24" y="44">Target tab</text>
-<rect class="b3" x="40" y="64" width="270" height="56" rx="8"/>
-<text x="56" y="88">page JS</text><text class="sub" x="56" y="106">WebGL2 / WebGPU calls, rAF loop</text>
-<rect class="b1" x="40" y="160" width="270" height="70" rx="8"/>
-<text x="56" y="184">hook.js (MAIN world)</text><text class="sub" x="56" y="202">wraps prototypes, setup log, snapshot,</text><text class="sub" x="56" y="218">WireWriter</text>
-<rect class="b1" x="40" y="290" width="270" height="56" rx="8"/>
-<text x="56" y="314">bridge.js (ISOLATED world)</text><text class="sub" x="56" y="332">base64 chunks over a runtime Port</text>
-<path class="ln" d="M175 120V158"/><path class="ln" d="M175 230V288"/>
-<text class="sub" x="184" y="264">window.postMessage</text>
-<rect class="grp" x="390" y="20" width="560" height="380" rx="10"/>
-<text x="404" y="44">webgd tab (extension/ui/index.html)</text>
-<rect class="b1" x="420" y="64" width="500" height="80" rx="8"/>
-<text x="436" y="88">webgd-ui (eframe + egui_dock, wgpu)</text><text class="sub" x="436" y="108">port.rs: Port client, chunk reassembly</text><text class="sub" x="436" y="126">replay_queue.rs, panels/*</text>
-<rect class="b2" x="420" y="200" width="150" height="110" rx="8"/>
-<text x="434" y="224">webgd-core</text><text class="sub" x="434" y="244">wire decode, model,</text><text class="sub" x="434" y="260">call labels, pixels,</text><text class="sub" x="434" y="276">trackers (native)</text>
-<rect class="b2" x="595" y="200" width="150" height="110" rx="8"/>
-<text x="609" y="224">webgd-replay</text><text class="sub" x="609" y="244">replay via js_sys,</text><text class="sub" x="609" y="260">inspection, readback,</text><text class="sub" x="609" y="276">trace runner (wasm)</text>
-<rect class="b2" x="770" y="200" width="150" height="110" rx="8"/>
-<text x="784" y="224">webgd-analysis</text><text class="sub" x="784" y="244">naga WGSL, glsl-lang</text><text class="sub" x="784" y="260">GLSL stats, cost</text><text class="sub" x="784" y="276">model (native)</text>
-<path class="ln" d="M495 144V198"/><path class="ln" d="M670 144V198"/><path class="ln" d="M845 144V198"/>
-<path class="ln" d="M310 318C360 318 360 104 418 104"/>
-<text class="sub" x="330" y="380">Port "webgd-target"</text>
-<rect class="b3" x="420" y="340" width="500" height="44" rx="8"/>
-<text x="436" y="367">webgd's own WebGL2 contexts / GPUDevice (replay target)</text>
-<path class="ln" d="M670 310V338"/>
-</svg>
-<p>Details: <a href="architecture.md">architecture.md</a> and the byte-level format in <a href="wire-format.md">wire-format.md</a>.</p>
-
-<h2 id="pipeline">Capture, replay, inspect</h2>
-<ol class="pipe">
-<li><b>Arm.</b> The UI sends <code>capture</code>; bridge.js forwards <code>arm</code> to hook.js.</li>
-<li><b>Snapshot.</b> On the next rAF callback hook.js records pre-frame resource contents and GL state.</li>
-<li><b>Record.</b> Every call until the next rAF timestamp is recorded, then encoded as wire bytes.</li>
-<li><b>Transfer.</b> bridge.js sends base64 chunks; <code>port.rs</code> reassembles and <code>wire::decode</code> builds a <code>Capture</code>.</li>
-<li><b>Replay.</b> <code>webgd-replay</code> runs setup, snapshot and frame up to the selected command on fresh contexts/devices.</li>
-<li><b>Inspect.</b> Targets, pipeline, bindings and resources are read back from the replay state; the trace runs instrumented replays.</li>
-</ol>
-
-<h2 id="ui">UI and revision history</h2>
-<p><b>Workspaces.</b> A top menu bar has File (<code>Open .webgd…</code>, <code>Save .webgd</code>; Ctrl/Cmd+O), Capture (<code>Refresh targets</code>, <code>Show Capture panel</code>, one entry per live target with gl2/gpu counts) and Window (focus any tab). It also switches between the <b>Frame Debugger</b> and <b>GPU Trace</b> workspaces, and each one keeps its own dock layout. The bottom status bar shows the source URL, the position (<code>Event i / N</code>, <code>Pre-frame setup call #k</code>, <code>Frame start</code>, <code>Frame end</code>), replay status and an error count that opens the Log when clicked. Home/End select the first or last event.</p>
-<p><b>Panels.</b> Events, Scrubber (click/drag to select, Left/Right to step), API Inspector, Render Targets (Fit / 1:1, <code>Open in Resource Viewer</code>, texel readout), Resources (<code>Written in frame</code> toggle; double-click selects the last write), Resource Viewer, GPU Trace, and Log (Errors/Warnings/Notes chips and a filter; clicking an error row selects its command).</p>
-<p><b>Revision click-through.</b> <code>webgd_core::track::revisions</code> (<code>all</code>, <code>revision_at</code>, <code>Revision</code>, <code>Access</code>) lists every create/write/read/destroy access to a resource in the pre-frame and frame sections. The Resource Viewer shows them in a Revisions side panel (Rev, Section, Event, Access, Call, detail). Clicking a frame revision selects that command. Clicking a pre-frame revision selects the setup call and shows the contents at frame start, using <code>Replayer::replay_to_frame_start</code>. ← / → jump between writes. The header reads <code>Revision r · contents at command #idx</code> or <code>contents at frame start</code>.</p>
-<p><b>Trace range summary.</b> Drag on the ruler, or shift+drag, to select a time range. Esc clears it, and <code>Zoom to range</code> / <code>Clear range</code> act on it. The Range summary shows the duration, the item count, the average and total for each counter, and the 10 longest items. Clicking one of them selects its command.</p>
-
-<h2 id="steps">What was built</h2>
-<p>Built by parallel agents against shared interface contracts, then integrated and verified end to end.</p>
-<div class="timeline">
-<div class="step"><h3>Step 0: Skeleton and toolchain</h3><p>Workspace, four crates, <code>xtask/src/main.rs</code> (<code>cargo xtask build</code>), <code>web/index.html</code>, <code>web/main.js</code>, <code>extension/manifest.json</code>, <code>extension/background.js</code>.</p></div>
-<div class="step"><h3>Step 1: Wire format and decoder</h3><p><code>crates/webgd-core/src/{capture,wire,display}.rs</code>, <code>tools/gen-wire-fixture.cjs</code>, <code>tests/fixtures/sample.wire</code>, <code>crates/webgd-core/tests/wire.rs</code>.</p></div>
-<div class="step"><h3>Step 2: Hook, bridge, transport</h3><p><code>extension/hook.js</code>, <code>extension/bridge.js</code>, <code>crates/webgd-ui/src/port.rs</code>, <code>files.rs</code>, <code>panels/capture.rs</code>.</p></div>
-<div class="step"><h3>Step 3: Frame-start snapshot</h3><p>WebGL2 state/resource and WebGPU buffer/texture readback in <code>extension/hook.js</code>.</p></div>
-<div class="step"><h3>Step 4: Command model and replay engine</h3><p><code>crates/webgd-core/src/track/commands.rs</code>, <code>crates/webgd-replay/src/{engine,js,value}.rs</code>, <code>gl/snapshot.rs</code>, <code>gpu/snapshot.rs</code>, <code>panels/commands.rs</code>, <code>panels/log.rs</code>.</p></div>
-<div class="step"><h3>Step 5: Inspection</h3><p><code>crates/webgd-core/src/pixels.rs</code>, <code>track/{gl,gpu}.rs</code>, <code>crates/webgd-replay/src/gl/inspect.rs</code>, <code>gpu/inspect.rs</code>, <code>crates/webgd-ui/src/replay_queue.rs</code>, <code>panels/inspect.rs</code>.</p></div>
-<div class="step"><h3>Step 6: Resource browser</h3><p><code>crates/webgd-core/src/track/resources.rs</code>, <code>panels/resources.rs</code>, <code>panels/viewer.rs</code>.</p></div>
-<div class="step"><h3>Step 7: GPU trace and estimated counters</h3><p><code>crates/webgd-analysis/src/{wgsl,glsl,model}.rs</code>, <code>crates/webgd-replay/src/trace.rs</code>, <code>panels/trace.rs</code>.</p></div>
-<div class="step"><h3>Step 8: UI overhaul and revision history</h3><p><code>crates/webgd-core/src/track/revisions.rs</code>, <code>crates/webgd-core/tests/revisions.rs</code>, <code>crates/webgd-ui/src/panels/scrubber.rs</code>; rewritten <code>crates/webgd-ui/src/{app,state,widgets}.rs</code> and <code>panels/{commands,inspect,resources,viewer,trace,log,capture}.rs</code>; frame-start replay (<code>replay_to_frame_start</code>, <code>ReplayState.frame_start</code>) in <code>crates/webgd-replay/src/lib.rs</code>.</p></div>
-<div class="step"><h3>Step 9: Page overlay, event colours, Geometry tab</h3><p><code>extension/hook.js</code> (<code>// --- page overlay ---</code> section); <code>crates/webgd-ui/src/widgets.rs</code> (<code>event_color</code>, <code>kind_color</code>, <code>text_on</code>), <code>panels/scrubber.rs</code> (<code>action_ordinals</code>), <code>panels/trace.rs</code>; <code>crates/webgd-core/src/geometry.rs</code> + <code>tests/geometry.rs</code>; <code>crates/webgd-analysis/src/vsxform.rs</code> + <code>tests/vsxform.rs</code>; <code>crates/webgd-replay/src/geometry.rs</code>; <code>crates/webgd-ui/src/panels/geometry.rs</code>.</p></div>
+<section class="intro" aria-labelledby="intro-h">
+<div class="wrap">
+<h2 id="intro-h">What it is</h2>
+<p>webgd records every WebGL2 or WebGPU call a page makes in one frame, then lets you step through that frame command by command, inspecting render targets, pipeline state, geometry and resource contents at each point.</p>
+<p>A Chrome extension hooks the page's graphics APIs and captures one <code>requestAnimationFrame</code> frame, along with a snapshot of GPU resource contents at the start of that frame. The webgd tab, a Rust/WASM app, replays the frame on its own WebGL2 context or GPU device up to whichever command you select.</p>
+<p>It runs locally in your browser. Captures stay on your machine unless you save them as a <code>.webgd</code> file.</p>
 </div>
+</section>
 
-<h2 id="verification">Verification results</h2>
-<table>
-<thead><tr><th>Check</th><th>Result</th></tr></thead>
-<tbody>
-<tr><td><code>cargo test</code></td><td class="ok">59 tests pass (core 36: wire 3, pixels 7, revisions 7, track 6, geometry 13; analysis 23: stats 16, vsxform 7)</td></tr>
-<tr><td><code>cargo clippy -p webgd-replay -p webgd-ui --target wasm32-unknown-unknown</code></td><td class="ok">clean (all crates)</td></tr>
-<tr><td><code>node tools/gen-wire-fixture.cjs &amp;&amp; git diff --exit-code tests/fixtures/sample.wire</code></td><td class="ok">byte-identical</td></tr>
-<tr><td><code>cargo xtask build</code></td><td class="ok">index.html, main.js, webgd_ui.js, webgd_ui_bg.wasm</td></tr>
-<tr><td>E2E live capture (Chrome 156)</td><td class="ok">both fixture pages captured; both replay to last command with 0 errors</td></tr>
-<tr><td>WebGPU drawIndexed inspection</td><td class="ok">256×256 rgba16float cube target; pipeline <code>triangle-list</code> + <code>depth24plus</code></td></tr>
-<tr><td>Stop inside pass (setPipeline before draw)</td><td class="ok">clear color only</td></tr>
-<tr><td>WebGL2 trace</td><td class="ok">sequential layout; <code>Fragments (rasterized, pre-depth)</code> up to 307200</td></tr>
-<tr><td>WebGPU trace (<code>--enable-webgpu-developer-features</code>)</td><td class="ok">real pass bars, non-zero ALU/occupancy</td></tr>
-<tr><td>Page overlay (both fixture pages)</td><td class="ok"><code>Webgd capturable</code>, FPS and frame counter shown top-right</td></tr>
-<tr><td>WebGPU Geometry (drawIndexed)</td><td class="ok">36 vertices, 24 unique, 12 primitives; pre-VS float32x3/float32x2 table; post-VS position f32x4 + uv</td></tr>
-<tr><td>WebGL2 Geometry (drawElements)</td><td class="ok">pre-VS <code>aPos</code>/<code>aUv</code>; post-VS <code>gl_Position</code> + <code>vUv</code></td></tr>
-<tr><td>Event colours</td><td class="ok">Scrubber blocks and Trace Items bars distinct per action, matching across panels</td></tr>
-</tbody>
-</table>
-
-<h2 id="limitations">Known limitations</h2>
-<ul class="lim">
-<li>Counters are estimates from a static cost model. Timing is measured on webgd's replay device, not the page's own submission.</li>
-<li>Chrome quantizes WebGPU timestamps (about 65 µs) unless <code>chrome://flags/#enable-webgpu-developer-features</code> is enabled.</li>
-<li>WebGPU occlusion results in Chrome are 0/1 visibility flags, so <code>Fragments (post-depth)</code> is 0 or 1.</li>
-<li>Passes with render bundles or occlusion queries are timed whole ("unsplit pass"). Independent WebGPU passes may show overlapping timestamps (GPU concurrency).</li>
-<li>depth24plus textures are not viewable. Pre-frame depth/stencil and MSAA contents are not captured (shown as a banner).</li>
-<li>GL errors are reported once per section.</li>
-<li>WebGL1 is detected but unsupported. Workers and OffscreenCanvas in workers are unsupported.</li>
-<li>Capture needs a visible tab driven by requestAnimationFrame; otherwise: <code>target does not render with requestAnimationFrame</code>.</li>
-<li>Each replayed <code>requestAdapter</code> gets a fresh adapter.</li>
+<section id="features" aria-labelledby="features-h">
+<div class="wrap">
+<h2 id="features-h">Features</h2>
+<ul class="features">
+<li><h3>Frame capture and page overlay</h3><p>Records every WebGL2/WebGPU call in one frame, plus the GPU resource contents at frame start. A small overlay on the page shows whether it can be captured, with FPS and frame counters.</p></li>
+<li><h3>Events and Scrubber</h3><p>Calls are grouped by render and compute passes, debug groups and page markers, with a text filter and an actions-only view. The Scrubber lays the frame out as a strip: click, drag or step with the arrow keys.</p></li>
+<li><h3>API Inspector and Render Targets</h3><p>Selecting a command replays the frame up to it. Render Targets shows the bound attachments with a texel readout, and the API Inspector walks the pipeline stage by stage with links to bound resources.</p></li>
+<li><h3>Geometry</h3><p>Shows the selected draw's vertices in 3D, before (Pre-VS) and after (Post-VS) the vertex shader, as wireframe, solid or points, next to a vertex table grouped by buffer slot.</p></li>
+<li><h3>Resources with revision history</h3><p>Lists every buffer, texture, shader, pipeline, sampler and bind group, and shows its contents at the replayed point. The Revisions panel lists each create, write, read and destroy; click one to jump to that command.</p></li>
+<li><h3>GPU Trace with estimated counters</h3><p>A timeline of passes, debug markers and draws per queue, timed on webgd's replay device. Occupancy, ALU, branch and texture-sample rows are estimates from a static shader cost model and are labelled “(est.)”.</p></li>
 </ul>
+</div>
+</section>
 
-<h2 id="quickstart">Quick start</h2>
-<p>Requires Rust 1.99+ (edition 2024), Node, and Chrome 121 or newer.</p>
-<pre><code>rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.130 --locked
-cargo xtask build
-python3 -m http.server 8000 --directory tests/pages</code></pre>
-<p>Open <code>chrome://extensions</code>, enable Developer mode, Load unpacked, select <code>extension/</code>. Reload pages opened before install, open <code>http://localhost:8000/webgpu.html</code> or <code>webgl2.html</code>, then click the webgd toolbar action. Standalone UI (no live capture): <code>python3 -m http.server 8080 --directory extension/ui</code>. More in <a href="user-guide.md">user-guide.md</a> and <a href="development.md">development.md</a>.</p>
+<section id="gallery" aria-labelledby="gallery-h">
+<div class="wrap">
+<h2 id="gallery-h">Captured from a real game</h2>
+<p class="gallery-lead">Sample: a three.js WebGL2 game at pokebonk.com, captured and replayed with webgd.</p>
+<div class="gallery">
+<figure class="wide">
+<a href="assets/pokebonk-overlay.jpg"><img src="assets/pokebonk-overlay.jpg" alt="The pokebonk.com WebGL2 game running in Chrome, with the small webgd overlay in the top-right corner reading Webgd capturable alongside FPS and frame counters"></a>
+<figcaption><strong>Page overlay.</strong> The game page once webgd has hooked its WebGL2 context.</figcaption>
+</figure>
+<figure>
+<a href="assets/frame-debugger.jpg"><img src="assets/frame-debugger.jpg" alt="webgd Frame Debugger workspace with a draw call selected in the Events list, its render target in Render Targets and its pipeline state in the API Inspector" loading="lazy"></a>
+<figcaption><strong>Frame Debugger.</strong> A draw selected, with its render targets and pipeline state.</figcaption>
+</figure>
+<figure>
+<a href="assets/geometry.jpg"><img src="assets/geometry.jpg" alt="webgd Geometry tab showing the selected draw's mesh in a 3D viewport above a vertex attribute table" loading="lazy"></a>
+<figcaption><strong>Geometry.</strong> The draw's vertices in 3D, with the vertex table below.</figcaption>
+</figure>
+<figure>
+<a href="assets/revisions.jpg"><img src="assets/revisions.jpg" alt="webgd Resource Viewer showing a texture's contents next to the Revisions panel listing the commands that created and wrote it" loading="lazy"></a>
+<figcaption><strong>Resource Viewer.</strong> A texture and the list of commands that created and wrote it.</figcaption>
+</figure>
+<figure>
+<a href="assets/gpu-trace.jpg"><img src="assets/gpu-trace.jpg" alt="webgd GPU Trace workspace with a timeline of passes, markers and draw items above estimated counter graphs" loading="lazy"></a>
+<figcaption><strong>GPU Trace.</strong> Timed items with estimated counter rows on one time axis.</figcaption>
+</figure>
+</div>
+</div>
+</section>
 
-<h2 id="layout">Repository layout</h2>
-<pre><code>crates/webgd-core/      capture model, wire.rs, display.rs, pixels.rs, track/ (native-testable)
-crates/webgd-analysis/  naga WGSL + glsl-lang GLSL analysis, model.rs (native-testable)
-crates/webgd-replay/    engine.rs, js.rs, value.rs, gl/, gpu/, trace.rs (wasm only)
-crates/webgd-ui/        eframe app, port.rs, replay_queue.rs, panels/ (wasm cdylib)
-xtask/                  cargo xtask build [--release]
-extension/              manifest.json, hook.js, bridge.js, background.js; ui/ is build output
-web/                    index.html, main.js (UI host templates)
-tests/pages/            webgl2.html, webgpu.html, common.js
-tests/fixtures/         sample.wire
-tools/                  gen-wire-fixture.cjs</code></pre>
+<section id="how" aria-labelledby="how-h">
+<div class="wrap">
+<h2 id="how-h">How it works</h2>
+<ol class="steps">
+<li><h3>Install</h3><p>Build with <code>cargo xtask build</code>, then load the <code>extension/</code> folder unpacked from <code>chrome://extensions</code> with Developer mode on.</p></li>
+<li><h3>Open the page</h3><p>Open (or reload) a page that renders with WebGL2 or WebGPU. The overlay reads “Webgd capturable” once the page is hooked.</p></li>
+<li><h3>Capture</h3><p>Click the webgd toolbar button to open the webgd tab, then pick the page from the Capture menu. webgd records the next frame.</p></li>
+<li><h3>Inspect and trace</h3><p>Select events to replay up to them, browse resources and geometry, or switch to GPU Trace and run a trace. Save the capture as <code>.webgd</code> to open it later.</p></li>
+</ol>
+</div>
+</section>
 
-<footer>webgd is released under the <a href="../LICENSE">MIT License</a>. Copyright 2026 snowapril.</footer>
+<section aria-labelledby="status-h">
+<div class="wrap">
+<h2 id="status-h">Status</h2>
+<p class="status">Chrome only (121 or newer). Supports WebGL2 and WebGPU; WebGL1 pages are detected but not supported. Counters are estimates, and timings are measured on webgd's replay, not the page's own submission. See the <a href="report.html#limitations">known limitations</a>.</p>
+</div>
+</section>
 </main>
+
+<footer>
+<div class="wrap">
+<ul>
+<li><a href="https://github.com/Snowapril/webgd/blob/main/LICENSE">MIT License</a></li>
+<li><a href="https://github.com/Snowapril/webgd">GitHub</a></li>
+<li><a href="report.html">Project report</a></li>
+</ul>
+<p>webgd is open source under the MIT License.</p>
+</div>
+</footer>
 </body>
 </html>
