@@ -17,6 +17,7 @@ pub enum Tab {
     ApiInspector,
     Resources,
     Viewer,
+    Geometry,
     Trace,
     Scrubber,
 }
@@ -38,6 +39,7 @@ impl Tab {
             Tab::ApiInspector => "API Inspector",
             Tab::Resources => "Resources",
             Tab::Viewer => "Resource Viewer",
+            Tab::Geometry => "Geometry",
             Tab::Trace => "GPU Trace",
             Tab::Scrubber => "Scrubber",
         }

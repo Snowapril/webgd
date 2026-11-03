@@ -1,6 +1,7 @@
 //! Shader static analysis and the estimated-counter model.
 mod glsl;
 pub mod model;
+pub mod vsxform;
 mod wgsl;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

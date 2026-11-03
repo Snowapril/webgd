@@ -1,12 +1,12 @@
 //! Latest-wins replay scheduling. One `spawn_local` loop owns the live `ReplayState`,
-//! replays to the requested stop (a frame command or frame start), then runs inspection and
-//! resource reads.
+//! replays to the requested stop (a frame command or frame start), then runs inspection,
+//! resource reads and draw geometry extraction.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use webgd_core::pixels::Image;
 use webgd_core::{Capture, ObjId};
-use webgd_replay::{Inspection, ProgramInfo, ReplayMode, ReplayState, Replayer};
+use webgd_replay::{GeometryData, Inspection, ProgramInfo, ReplayMode, ReplayState, Replayer};
 
 /// Identifies one replay: capture generation + stop point.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -54,6 +54,8 @@ pub struct Results {
     pub inspection: Option<(Key, Inspection)>,
     /// Latest view read, possibly another key than the current request.
     pub view: Option<(Key, ViewReq, Result<ViewData, String>)>,
+    /// Latest draw geometry: (replay key, instance, data), possibly another key than the current request.
+    pub geometry: Option<(Key, u32, Result<GeometryData, String>)>,
 }
 
 struct Request {
@@ -61,6 +63,8 @@ struct Request {
     key: Key,
     inspect: Option<usize>,
     view: Option<ViewReq>,
+    /// Instance to extract geometry for (command stops only).
+    geometry: Option<u32>,
 }
 
 pub type ReplayerCell = Rc<RefCell<Option<Rc<Replayer>>>>;
@@ -75,11 +79,14 @@ struct Shared {
     active: Option<Key>,
 }
 
+/// Last request handed to `ensure`: (key, inspect index, view read, geometry instance).
+type Submitted = (Key, Option<usize>, Option<ViewReq>, Option<u32>);
+
 pub struct ReplayQueue {
     ctx: egui::Context,
     shared: Rc<RefCell<Shared>>,
     replayer: ReplayerCell,
-    last_submitted: Option<(Key, Option<usize>, Option<ViewReq>)>,
+    last_submitted: Option<Submitted>,
 }
 
 /// Shared `Replayer` (one adapter request per UI session).
@@ -105,16 +112,18 @@ impl ReplayQueue {
         self.replayer.clone()
     }
 
-    /// Requests replay to `key.stop` (plus inspection / view read). No-op if identical to the last
-    /// request. `inspect` must be `None` for frame-start keys.
+    /// Requests replay to `key.stop` (plus inspection / view read / draw geometry for instance
+    /// `geometry`). No-op if identical to the last request. `inspect` and `geometry` must be `None`
+    /// for frame-start keys.
     pub fn ensure(
         &mut self,
         cap: &Rc<Capture>,
         key: Key,
         inspect: Option<usize>,
         view: Option<ViewReq>,
+        geometry: Option<u32>,
     ) {
-        let want = (key, inspect, view);
+        let want = (key, inspect, view, geometry);
         if self.last_submitted == Some(want) {
             return;
         }
@@ -125,6 +134,7 @@ impl ReplayQueue {
             key,
             inspect,
             view,
+            geometry,
         });
         if !sh.running {
             sh.running = true;
@@ -229,6 +239,22 @@ async fn run(shared: Rc<RefCell<Shared>>, cell: ReplayerCell, ctx: egui::Context
                 ViewReq::Program(id) => Ok(ViewData::Program(state.program_info(id))),
             };
             shared.borrow_mut().results.view = Some((req.key, view, data));
+            ctx.request_repaint();
+        }
+        if let (Some(instance), Some(index)) = (req.geometry, req.key.stop)
+            && !superseded(&shared)
+            && shared
+                .borrow()
+                .results
+                .geometry
+                .as_ref()
+                .is_none_or(|(k, i, _)| *k != req.key || *i != instance)
+        {
+            let data = state
+                .geometry(&req.cap, index, instance)
+                .await
+                .map_err(|e| e.to_string());
+            shared.borrow_mut().results.geometry = Some((req.key, instance, data));
             ctx.request_repaint();
         }
         shared.borrow_mut().held = Some((req.key, state));

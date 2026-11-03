@@ -12,6 +12,8 @@ pub mod buf_usage {
     pub const MAP_WRITE: u32 = 0x2;
     pub const COPY_SRC: u32 = 0x4;
     pub const COPY_DST: u32 = 0x8;
+    pub const UNIFORM: u32 = 0x40;
+    pub const STORAGE: u32 = 0x80;
     pub const QUERY_RESOLVE: u32 = 0x200;
 }
 

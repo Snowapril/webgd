@@ -10,13 +10,14 @@ use webgd_core::track::commands::CmdKind;
 const OPEN_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
 
 /// Every tab, in the order listed by the Window menu.
-const ALL_TABS: [Tab; 9] = [
+const ALL_TABS: [Tab; 10] = [
     Tab::Events,
     Tab::Scrubber,
     Tab::RenderTargets,
     Tab::ApiInspector,
     Tab::Resources,
     Tab::Viewer,
+    Tab::Geometry,
     Tab::Trace,
     Tab::Log,
     Tab::Capture,
@@ -33,10 +34,10 @@ pub struct App {
     summary: Option<(u64, String)>,
 }
 
-/// Frame Debugger: Events/Capture left, Render Targets/Resource Viewer center,
+/// Frame Debugger: Events/Capture left, Render Targets/Resource Viewer/Geometry center,
 /// API Inspector/Resources right, Scrubber + Log as a thin bottom strip.
 fn frame_debugger_layout() -> DockState<Tab> {
-    let mut dock = DockState::new(vec![Tab::RenderTargets, Tab::Viewer]);
+    let mut dock = DockState::new(vec![Tab::RenderTargets, Tab::Viewer, Tab::Geometry]);
     let surface = dock.main_surface_mut();
     let [main, bottom] = surface.split_below(NodeIndex::root(), 0.87, vec![Tab::Scrubber]);
     surface.split_right(bottom, 0.72, vec![Tab::Log]);
@@ -124,8 +125,14 @@ impl App {
             None
         };
         let view = self.panels.viewer.wanted_read(l, self.state.view);
+        // Geometry only for command stops while the Geometry tab was shown (last or this frame).
+        let geometry = if key.stop.is_some() {
+            self.panels.geometry.wanted(l, self.state.selected)
+        } else {
+            None
+        };
         let cap = l.cap.clone();
-        self.state.replay.ensure(&cap, key, inspect, view);
+        self.state.replay.ensure(&cap, key, inspect, view, geometry);
     }
 
     fn open_file(&mut self) {
@@ -447,6 +454,7 @@ impl eframe::App for App {
             Workspace::FrameDebugger => frame_dock,
             Workspace::GpuTrace => trace_dock,
         };
+        panels.geometry.begin_frame();
         egui::CentralPanel::no_frame().show(ui, |ui| {
             DockArea::new(dock)
                 .id(egui::Id::new(("webgd_dock", ws)))

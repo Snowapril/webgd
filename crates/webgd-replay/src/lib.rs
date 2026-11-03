@@ -8,6 +8,7 @@ use webgd_core::pixels::Image;
 use webgd_core::{Capture, ObjId};
 
 mod engine;
+mod geometry;
 mod gl;
 mod gpu;
 mod js;
@@ -192,7 +193,41 @@ impl Replayer {
     }
 }
 
+/// Geometry of one draw call at the replayed point.
+pub struct GeometryData {
+    pub index: usize,
+    pub topology: webgd_core::geometry::Topology,
+    /// Vertex ids in submission order (index buffer decoded, base vertex applied).
+    pub draw_order: Vec<u32>,
+    pub restart: Option<u32>,
+    /// Sorted unique vertex ids referenced by the draw (restart value excluded); streams are aligned to this.
+    pub vertex_ids: Vec<u32>,
+    pub instance: u32,
+    pub instance_count: u32,
+    /// Vertex input layout as set in the pipeline (WebGPU `vertex.buffers`) / VAO (WebGL2).
+    pub layout: Vec<webgd_core::geometry::LayoutBuffer>,
+    /// Pre-vertex-shader attributes.
+    pub inputs: Vec<webgd_core::geometry::AttribStream>,
+    /// Post-vertex-shader outputs, or why they are unavailable (UI disables the post-VS view).
+    pub outputs: Result<Vec<webgd_core::geometry::AttribStream>, String>,
+    /// Index into `outputs` of the clip-space position.
+    pub position_output: Option<usize>,
+    pub notes: Vec<String>,
+}
+
 impl ReplayState {
+    /// Geometry of draw `frame[index]` (must equal this state's stop; Draw kind only; indirect draws
+    /// read their arguments from the replayed indirect buffer). `instance` selects the instance for
+    /// per-instance attributes and post-VS.
+    pub async fn geometry(
+        &self,
+        cap: &Capture,
+        index: usize,
+        instance: u32,
+    ) -> Result<GeometryData, ReplayError> {
+        geometry::geometry(self, cap, index, instance).await
+    }
+
     /// GL context that `frame[index]` addresses, or the most recent one used before it.
     fn gl_for_index(&self, cap: &Capture, index: usize) -> Option<usize> {
         let upto = index.min(cap.frame.len().saturating_sub(1));
