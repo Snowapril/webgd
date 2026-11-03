@@ -18,6 +18,8 @@ egui_dock = "0.21.1"
 wgpu = { version = "30", default-features = false, features = ["std", "webgpu", "webgl", "wgsl"] }
 naga = { version = "30", features = ["wgsl-in"] }
 glsl-lang = "0.8.1"
+glsl-lang-pp = "0.8.1"
+lang-util = "0.8.1"
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

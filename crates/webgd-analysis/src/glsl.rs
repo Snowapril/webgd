@@ -11,7 +11,15 @@ use glsl_lang::ast::{
     StructFieldSpecifier, TranslationUnit, TypeQualifier, TypeQualifierSpecData, TypeSpecifier,
     TypeSpecifierNonArrayData, UnaryOpData,
 };
-use glsl_lang::parse::DefaultParse;
+use glsl_lang::lexer::full::LexicalError;
+use glsl_lang::lexer::full::fs::{Lexer as PpLexer, LexerIterator as PpIter, PreprocessorExt};
+use glsl_lang::lexer::{HasLexerError, LangLexer};
+use glsl_lang::parse::{HasParser, LangParser, ParseContext, ParseOptions};
+use glsl_lang_pp::processor::ProcessorState;
+use glsl_lang_pp::processor::event::{ErrorKind, ProcessingErrorKind};
+use glsl_lang_pp::processor::fs::{Std, StdProcessor};
+use glsl_lang_pp::processor::nodes::{Define, DefineObject};
+use lang_util::error::{ParseErrorKind, error_location};
 
 use crate::model::{self, Cost};
 use crate::{AnalysisError, Stage, StageStats};
@@ -37,22 +45,65 @@ impl Ty {
     }
 }
 
-/// Blank out preprocessor lines (`#version`, `#define`, ...): the min lexer does not handle them.
-fn preprocess(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
-    for line in src.lines() {
-        if !line.trim_start().starts_with('#') {
-            out.push_str(line);
-        }
-        out.push('\n');
+/// Preprocessor token stream with the diagnostics a GLSL ES compiler only warns about removed:
+/// unknown `#extension` names, use of `warn`-behavior extension types, and malformed `#pragma`s.
+struct NonFatal<'r, 'p>(PpIter<'r, 'p, Std>);
+
+impl<'r, 'p> HasLexerError for NonFatal<'r, 'p> {
+    type Error = <PpIter<'r, 'p, Std> as HasLexerError>::Error;
+}
+
+impl<'r, 'p> Iterator for NonFatal<'r, 'p> {
+    type Item = <PpIter<'r, 'p, Std> as Iterator>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.find(|item| {
+            !matches!(item, Err(LexicalError::Processor(e)) if matches!(
+                e.inner(),
+                ErrorKind::WarnExtUse { .. }
+                    | ErrorKind::UnsupportedExt { .. }
+                    | ErrorKind::Processing(ProcessingErrorKind::DirectivePragma(_))
+            ))
+        })
     }
-    out
+}
+
+/// 1-based line and byte column of `offset` in `src`.
+fn line_col(src: &str, offset: usize) -> (usize, usize) {
+    let before = &src.as_bytes()[..offset.min(src.len())];
+    let line_start = before
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |p| p + 1);
+    let line = before.iter().filter(|&&b| b == b'\n').count() + 1;
+    (line, before.len() - line_start + 1)
+}
+
+/// Preprocesses (`#version`, `#extension`, `#define` incl. function-like macros,
+/// `#if`/`#ifdef`/`#else`/`#endif`, `#pragma`) and parses a GLSL shader. `GL_ES` is predefined
+/// to 1 as on WebGL; `__VERSION__` follows the `#version` directive. Errors read
+/// `line:col: message` relative to `src`.
+pub(crate) fn parse_translation_unit(src: &str) -> Result<TranslationUnit, AnalysisError> {
+    let state = ProcessorState::builder()
+        .definition(Define::object("GL_ES".into(), DefineObject::one(), true))
+        .finish();
+    let mut processor = StdProcessor::new();
+    let file = processor.open_source(src, "").with_state(state);
+    let lexer: PpLexer<'_, '_, Std> = LangLexer::new(file, &ParseOptions::default());
+    let ctx = ParseContext::new();
+    let mut tokens = NonFatal(lexer.run(ctx.clone()));
+    let parser = <<TranslationUnit as HasParser>::Parser as LangParser>::new();
+    // Locations are computed here rather than with the lexer's `resolve_err`, which panics on
+    // errors reported after the source-block expansion finished (unexpected end of input).
+    LangParser::parse(&parser, ctx, &mut tokens).map_err(|err| {
+        let (_, range) = error_location(&err);
+        let (line, col) = line_col(src, usize::from(range.start()));
+        AnalysisError::Parse(format!("{line}:{col}: {}", ParseErrorKind::from(err)))
+    })
 }
 
 pub fn stats(src: &str, stage: Stage) -> Result<StageStats, AnalysisError> {
-    let src = preprocess(src);
-    let tu =
-        TranslationUnit::parse(src.as_str()).map_err(|e| AnalysisError::Parse(e.to_string()))?;
+    let tu = parse_translation_unit(src)?;
 
     let mut a = Analyzer::default();
     for ed in &tu.0 {

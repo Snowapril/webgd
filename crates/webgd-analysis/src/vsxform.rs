@@ -25,10 +25,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use glsl_lang::ast::{
-    DeclarationData, ExternalDeclarationData, StorageQualifierData, TranslationUnit, TypeQualifier,
+    DeclarationData, ExternalDeclarationData, StorageQualifierData, TypeQualifier,
     TypeQualifierSpecData, TypeSpecifierNonArrayData,
 };
-use glsl_lang::parse::DefaultParse;
 use naga::{
     AddressSpace, ArraySize, BinaryOperator, Binding, Block, BuiltIn, EntryPoint, Expression,
     Function, FunctionArgument, GlobalVariable, Handle, Literal, MemoryDecorations, Module, Range,
@@ -39,6 +38,7 @@ use naga::{
 };
 
 use crate::AnalysisError;
+use crate::glsl::parse_translation_unit;
 
 /// Scalar kind of a shader input/output (webgd-replay maps it to `webgd_core::geometry::ScalarKind`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -770,18 +770,6 @@ pub fn wgsl_vertex_to_compute(src: &str, entry: Option<&str>) -> Result<VsComput
     })
 }
 
-/// Blank out preprocessor lines (`#version`, `#define`, ...), as the GLSL stats front end does.
-fn strip_preprocessor(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
-    for line in src.lines() {
-        if !line.trim_start().starts_with('#') {
-            out.push_str(line);
-        }
-        out.push('\n');
-    }
-    out
-}
-
 fn is_out(q: Option<&TypeQualifier>) -> bool {
     q.iter().flat_map(|q| q.qualifiers.iter()).any(|spec| {
         matches!(&spec.content, TypeQualifierSpecData::Storage(st)
@@ -815,9 +803,7 @@ fn glsl_io_ty(t: &TypeSpecifierNonArrayData) -> Option<(u32, ScalarKind)> {
 /// `out` variables of array, matrix, struct or interface-block type are not reported (no output
 /// entry is produced for them).
 pub fn glsl_vertex_outputs(src: &str) -> Result<Vec<VsOutput>, AnalysisError> {
-    let src = strip_preprocessor(src);
-    let tu =
-        TranslationUnit::parse(src.as_str()).map_err(|e| AnalysisError::Parse(e.to_string()))?;
+    let tu = parse_translation_unit(src)?;
     let mut outs = vec![VsOutput {
         name: "gl_Position".to_string(),
         builtin_position: true,

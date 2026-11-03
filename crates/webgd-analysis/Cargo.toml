@@ -5,5 +5,7 @@ version.workspace = true
 
 [dependencies]
 naga = { workspace = true, features = ["wgsl-out"] }
-glsl-lang.workspace = true
+glsl-lang = { workspace = true, features = ["lexer-full"] }
+glsl-lang-pp = { workspace = true, features = ["full"] }
+lang-util = { workspace = true, features = ["lalrpop"] }
 thiserror.workspace = true

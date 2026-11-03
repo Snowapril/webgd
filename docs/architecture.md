@@ -39,7 +39,7 @@ flowchart TD
   replay --> analysis
   replay --> jssys[js-sys / wasm-bindgen]
   analysis --> naga[naga 30]
-  analysis --> glsl[glsl-lang 0.8.1]
+  analysis --> glsl[glsl-lang 0.8.1 + glsl-lang-pp]
   core --> thiserror[thiserror]
 ```
 
@@ -632,8 +632,12 @@ generic, illustrative SIMT machine, not real hardware.
 The WGSL front end parses with `naga::front::wgsl::parse_str`, validates to get expression
 types, and sums workgroup variable sizes. If `entry` is `None`, it picks the only entry point of
 the requested stage, and reports `AmbiguousEntry` when there are several. The GLSL front end
-drops lines whose first non-space character is `#`, parses with glsl-lang, and infers widths
-from declarations, constructors, swizzles and built-ins.
+(`glsl_stats` and `glsl_vertex_outputs`) runs the glsl-lang-pp preprocessor, so only active
+`#if`/`#ifdef` branches are parsed and `#define` macros, including function-like ones, are
+expanded. `GL_ES` is predefined to 1 and `__VERSION__` follows `#version`. Unknown
+`#extension` names and malformed `#pragma`s are ignored rather than treated as errors. Parse
+errors are reported as `line:col: message` in the original source. The front end then infers
+widths from declarations, constructors, swizzles and built-ins.
 
 The counters are estimates of this model and are always labelled `(est.)`. Durations are
 measured on webgd's replay device, not on the page's own submission.

@@ -52,6 +52,7 @@ node tools/gen-wire-fixture.cjs && git diff --exit-code tests/fixtures/sample.wi
 - `crates/webgd-core/tests/geometry.rs` — attribute format decoding, index decoding, draw vertex ids, vertex fetch and primitive assembly (13 tests).
 - `crates/webgd-analysis/tests/stats.rs` — cost model cases for WGSL and GLSL ES 3.00 (ALU, loops, branches, texture samples, workgroup memory and occupancy).
 - `crates/webgd-analysis/tests/vsxform.rs` — WGSL vertex→compute transform (IO contract, bind group placement, output order, rejected IO) and GLSL vertex output discovery (7 tests).
+- `crates/webgd-analysis/tests/glsl_preprocess.rs` — GLSL preprocessing in `glsl_stats` and `glsl_vertex_outputs`: three.js-style `#ifdef`/`#else` branches, object and function-like macros, `#if` expressions, `GL_ES`/`__VERSION__`, unknown extensions, and parse error lines (5 tests).
 
 `webgd-replay` and `webgd-ui` only build for wasm32, so they are covered by clippy and the manual checklist below.
 
