@@ -2,11 +2,11 @@
 //! submits) with marker / debug-group bands above it. Widths follow GPU duration when a trace is
 //! available, otherwise every action gets the same width.
 use crate::state::{AppState, Loaded};
-use crate::widgets::{ACCENT, fmt_ns, kind_color, marker_color};
+use crate::widgets::{ACCENT, event_color, fmt_ns, kind_color, marker_color};
 use egui::{Align2, FontId, Key, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use std::collections::HashMap;
 use std::rc::Rc;
-use webgd_core::track::commands::CmdKind;
+use webgd_core::track::commands::{CmdKind, CmdNode};
 use webgd_replay::TraceResult;
 
 /// Band rows drawn above the action lane; deeper groups are not drawn.
@@ -21,6 +21,20 @@ pub(crate) fn is_action(k: &CmdKind) -> bool {
         k,
         CmdKind::Draw | CmdKind::Dispatch | CmdKind::Clear | CmdKind::Copy | CmdKind::Submit
     )
+}
+
+/// Action ordinal per frame index (position among the frame's actions, in frame order; `None`
+/// for non-actions). Feeds `event_color` so the scrubber and trace color an action identically.
+pub(crate) fn action_ordinals(tree: &[CmdNode]) -> Vec<Option<usize>> {
+    let mut next = 0;
+    tree.iter()
+        .map(|c| {
+            is_action(&c.kind).then(|| {
+                next += 1;
+                next - 1
+            })
+        })
+        .collect()
 }
 
 /// GPU duration (ns) per frame index from the trace items of every queue.
@@ -56,7 +70,8 @@ struct Band {
 struct Layout {
     key: (u64, usize),
     proportional: bool,
-    /// Frame indices drawn as blocks, ascending.
+    /// Frame indices drawn as blocks, ascending. A block's position here is its action ordinal
+    /// (same as `action_ordinals`; every call counts when the frame has no actions).
     slots: Vec<usize>,
     /// Start fraction per frame index; `start[n]` = 1.0.
     start: Vec<f64>,
@@ -322,13 +337,23 @@ impl ScrubberUi {
             }
         }
 
-        // Action lane.
-        for &i in &lay.slots {
+        // Action lane: per-action fill, kind strip along the bottom, dark separators between blocks.
+        let sep = Stroke::new(1.0, vis.extreme_bg_color);
+        for (ord, &i) in lay.slots.iter().enumerate() {
             let r = block_rect(i);
             if r.right() < rect.left() || r.left() > rect.right() {
                 continue;
             }
-            painter.rect_filled(r, 1.0, kind_color(&l.tree[i].kind));
+            let kind = &l.tree[i].kind;
+            painter.rect_filled(r, 1.0, event_color(kind, ord));
+            painter.rect_filled(
+                Rect::from_min_max(pos2(r.left(), r.bottom() - 3.0), r.max),
+                0.0,
+                kind_color(kind),
+            );
+            if ord > 0 && r.width() > 2.0 {
+                painter.vline(fx(lay.start[i]), r.y_range(), sep);
+            }
         }
         if let Some(Hit::Event(i)) = hover {
             painter.rect_stroke(

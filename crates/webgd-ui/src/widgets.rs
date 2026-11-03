@@ -75,7 +75,7 @@ pub fn apply_theme(ctx: &egui::Context) {
     });
 }
 
-/// Color of an event by command kind (event list, scrubber, trace items).
+/// Kind indicator color of an event (event list strip, scrubber/trace kind strip).
 pub fn kind_color(kind: &CmdKind) -> Color32 {
     match kind {
         CmdKind::Draw => Color32::from_rgb(112, 192, 124),
@@ -86,6 +86,52 @@ pub fn kind_color(kind: &CmdKind) -> Color32 {
         CmdKind::GroupBegin(_) | CmdKind::GroupEnd => Color32::from_rgb(150, 162, 178),
         CmdKind::PassBegin | CmdKind::PassEnd => Color32::from_rgb(110, 196, 206),
         CmdKind::Call => Color32::from_rgb(182, 186, 192),
+    }
+}
+
+/// Golden-angle hue step (137.5°) as a fraction of the hue circle.
+const GOLDEN_HUE: f64 = 0.381_966_011_250_105;
+
+/// Fill color of one action: hue rotates by the golden angle per `ordinal` (the action's position
+/// among the frame's actions), so neighbours differ strongly and colors are stable across frames.
+/// The kind sets saturation/value: shading work (draw, dispatch) is brightest, transfers dimmest.
+pub fn event_color(kind: &CmdKind, ordinal: usize) -> Color32 {
+    let (s, v) = match kind {
+        CmdKind::Draw | CmdKind::Dispatch => (0.55, 0.80),
+        CmdKind::Clear => (0.45, 0.72),
+        CmdKind::Copy | CmdKind::Submit => (0.36, 0.64),
+        _ => (0.24, 0.60),
+    };
+    hsv(((ordinal as f64 * GOLDEN_HUE).fract()) as f32, s, v)
+}
+
+/// sRGB-space HSV (all in 0..=1) to an opaque color.
+fn hsv(h: f32, s: f32, v: f32) -> Color32 {
+    let h6 = h.rem_euclid(1.0) * 6.0;
+    let sector = h6.floor();
+    let f = h6 - sector;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    let (r, g, b) = match sector as u32 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    let u = |c: f32| (c * 255.0).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(u(r), u(g), u(b))
+}
+
+/// Black or white, whichever contrasts more with `bg` (WCAG relative luminance).
+pub fn text_on(bg: Color32) -> Color32 {
+    let lin = egui::ecolor::linear_f32_from_gamma_u8;
+    let lum = 0.2126 * lin(bg.r()) + 0.7152 * lin(bg.g()) + 0.0722 * lin(bg.b());
+    // Equal contrast point: (L + 0.05) / 0.05 == 1.05 / (L + 0.05).
+    if lum > 0.179 {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
     }
 }
 

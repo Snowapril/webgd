@@ -1,9 +1,12 @@
 //! GPU Trace panel: hand-painted timeline with collapsible per-queue row groups (pass bars, marker
 //! rows, item bars), estimated counter graphs, a hover crosshair, time-range selection and a range
 //! summary table. The latest successful result is shared through `AppState::trace`.
+use super::scrubber::action_ordinals;
 use crate::replay_queue::get_replayer;
 use crate::state::AppState;
-use crate::widgets::{ACCENT, ERROR, WARN, fmt_ns, fmt_num, kind_color, marker_color};
+use crate::widgets::{
+    ACCENT, ERROR, WARN, event_color, fmt_ns, fmt_num, kind_color, marker_color, text_on,
+};
 use egui::{
     Align2, Color32, CursorIcon, FontId, Key, Painter, Pos2, Rect, RichText, Sense, Shape, Stroke,
     StrokeKind, pos2, vec2,
@@ -59,6 +62,8 @@ pub struct TraceUi {
     range_anchor: Option<f64>,
     /// `st.selected` as seen last frame; a change scrolls the timeline to the selected command.
     last_selected: Option<usize>,
+    /// `action_ordinals` of the loaded capture, keyed by its generation.
+    ordinals: Option<(u64, Vec<Option<usize>>)>,
 }
 
 enum Row<'a> {
@@ -275,23 +280,14 @@ fn focus_span(tr: &TraceResult, sel: usize) -> Option<(f64, f64)> {
         .map(window)
 }
 
-/// Readable text color on top of `bg`.
-fn text_on(bg: Color32) -> Color32 {
-    let lum = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
-    if lum > 140.0 {
-        Color32::BLACK
-    } else {
-        Color32::WHITE
-    }
-}
-
-fn span_color(row: &Row, s: &Span, tree: &[CmdNode]) -> Color32 {
+fn span_color(row: &Row, s: &Span, tree: &[CmdNode], ordinals: &[Option<usize>]) -> Color32 {
     match row {
         Row::QueueHeader(..) => kind_color(&CmdKind::PassBegin),
         Row::Markers(..) => marker_color(s.depth as usize, &s.label),
-        _ => tree
-            .get(s.index)
-            .map_or(Color32::GRAY, |n| kind_color(&n.kind)),
+        _ => tree.get(s.index).map_or(Color32::GRAY, |n| {
+            let ord = ordinals.get(s.index).copied().flatten().unwrap_or(s.index);
+            event_color(&n.kind, ord)
+        }),
     }
 }
 
@@ -485,6 +481,9 @@ impl TraceUi {
             return;
         };
         let (tree, labels) = (&l.tree, &l.labels);
+        if self.ordinals.as_ref().is_none_or(|(g, _)| *g != generation) {
+            self.ordinals = Some((generation, action_ordinals(tree)));
+        }
 
         // Ruler: fixed above the scrolling rows; drag selects a range, click clears it.
         let (ruler_rect, ruler_resp) =
@@ -710,6 +709,11 @@ impl TraceUi {
     ) -> Option<Hit<'t>> {
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
+        let ordinals = self
+            .ordinals
+            .as_ref()
+            .map_or(&[][..], |(_, o)| o.as_slice());
+        let sep = Stroke::new(1.0, visuals.extreme_bg_color);
         let font = FontId::proportional(11.0);
         let header_font = FontId::proportional(12.0);
         let text_col = visuals.text_color();
@@ -879,8 +883,21 @@ impl TraceUi {
                             continue;
                         }
                         let r = Rect::from_min_max(pos2(x0, lane.top()), pos2(x1, lane.bottom()));
-                        let col = span_color(row, s, tree);
+                        let col = span_color(row, s, tree, ordinals);
                         row_p.rect_filled(r, if zero { 0.0 } else { 2.0 }, col);
+                        if let Row::Items(_) = row
+                            && let Some(n) = tree.get(s.index)
+                        {
+                            // Kind strip along the bottom; separator on the bar's left edge.
+                            row_p.rect_filled(
+                                Rect::from_min_max(pos2(r.left(), r.bottom() - 3.0), r.max),
+                                0.0,
+                                kind_color(&n.kind),
+                            );
+                            if !zero && r.width() > 2.0 {
+                                row_p.vline(r.left(), r.y_range(), sep);
+                            }
+                        }
                         if selected == Some(s.index) {
                             row_p.rect_stroke(
                                 r,
