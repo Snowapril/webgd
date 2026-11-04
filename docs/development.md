@@ -18,6 +18,7 @@ See [architecture.md](architecture.md) for the component design and [wire-format
 | `crates/webgd-analysis` | WGSL (naga) and GLSL (glsl-lang) static analysis; cost model constants in `model.rs`; vertex→compute transform and GLSL vertex output discovery in `vsxform.rs`. Native-testable. |
 | `crates/webgd-replay` | wasm only. Replay engine (`engine.rs`), JS helpers (`js.rs`), value conversion (`value.rs`), GL snapshot/formats/uniforms/inspection (`gl/`), GPU snapshot/inspection (`gpu/`), draw geometry extraction (`geometry.rs`), trace runner (`trace.rs`). |
 | `crates/webgd-ui` | wasm cdylib. eframe 0.36 + egui_dock 0.21 on wgpu. `app.rs` (menu bar, status bar, workspaces and their dock layouts), `state.rs` (`AppState`, `Tab`, `Workspace`, loaded capture with resource rows and revision histories), `widgets.rs` (shared colors and widgets), `port.rs` (extension port client), `files.rs` (open/save), `replay_queue.rs` (replay scheduling), `panels/` (see below). |
+| `crates/webgd-cli` | Native binary `webgd`: Markdown text export of a `.webgd` capture (`webgd capture`, `webgd help`). |
 | `xtask` | Build orchestration. |
 | `extension/` | `manifest.json`, `hook.js` (MAIN world, capture), `bridge.js` (isolated world, transport), `background.js` (opens the UI tab). `extension/ui/` is build output and gitignored. |
 | `web/` | `index.html`, `main.js` host page templates copied into `extension/ui/`. |
@@ -41,15 +42,17 @@ cargo xtask build --release
 cargo test
 cargo clippy -p webgd-replay -p webgd-ui --target wasm32-unknown-unknown
 node tools/gen-wire-fixture.cjs && git diff --exit-code tests/fixtures/sample.wire
+cargo run -p webgd-cli -- capture tests/fixtures/sample.wire   # Markdown export to stdout
 ```
 
-`cargo test` runs only the native `default-members` (`webgd-core`, `webgd-analysis`, `xtask`):
+`cargo test` runs only the native `default-members` (`webgd-core`, `webgd-analysis`, `webgd-cli`, `xtask`):
 
 - `crates/webgd-core/tests/wire.rs` — decodes `sample.wire` and checks sections, method names, blob bytes and labels; every truncated prefix returns `Truncated` without panicking.
 - `crates/webgd-core/tests/pixels.rs` — f16 and rg11b10 decoding, sRGB passthrough, range mapping, channel masking.
 - `crates/webgd-core/tests/track.rs` — command tree, resource list and GPU state tracking on hand-built captures.
 - `crates/webgd-core/tests/revisions.rs` — revision histories: access classification, per-resource numbering, view→texture attribution, setup vs frame sections, `revision_at`.
 - `crates/webgd-core/tests/geometry.rs` — attribute format decoding, index decoding, draw vertex ids, vertex fetch and primitive assembly (13 tests).
+- `crates/webgd-core/tests/export.rs` — Markdown capture and trace exports (`capture_markdown`, `trace_markdown`): section contents, options, row limits, deterministic output.
 - `crates/webgd-analysis/tests/stats.rs` — cost model cases for WGSL and GLSL ES 3.00 (ALU, loops, branches, texture samples, workgroup memory and occupancy).
 - `crates/webgd-analysis/tests/vsxform.rs` — WGSL vertex→compute transform (IO contract, bind group placement, output order, rejected IO) and GLSL vertex output discovery (7 tests).
 - `crates/webgd-analysis/tests/glsl_preprocess.rs` — GLSL preprocessing in `glsl_stats` and `glsl_vertex_outputs`: three.js-style `#ifdef`/`#else` branches, object and function-like macros, `#if` expressions, `GL_ES`/`__VERSION__`, unknown extensions, and parse error lines (5 tests).
@@ -81,8 +84,9 @@ python3 -m http.server 8000 --directory tests/pages
 8. Revisions (Resource Viewer, offscreen target texture): the list has a pre-frame `create` row and frame `write` rows for the offscreen pass. Click a frame row: that command is selected and the header reads `Revision r · contents at command #idx`. ← / → jump between writes.
 9. Frame start: click the pre-frame `create` row (or a row in the Events `Pre-frame setup` group). The setup call is highlighted, the status bar shows `Pre-frame setup call #k`, and the viewer header reads `contents at frame start`; the checker texture still shows its checkerboard.
 10. GPU Trace workspace → **Run trace**: a `Queue (GPUDevice#…)` row with pass bars, `Offscreen` / `Compute` / `Composite` markers, counter rows. Real pass bars and non-zero ALU/occupancy need `--enable-webgpu-developer-features` (or the matching chrome://flags entry). Items bars have the same colour as the same action in the Scrubber. Clicking a draw bar selects it in Events; back in Frame Debugger, Events shows GPU Duration and Scrubber widths follow it.
-11. Repeat with `webgl2.html`: the overlay shows; `gl2: 1`, marker groups, `drawElements` shows the RGBA16F target, uniforms and texture units; Geometry Pre-VS shows `aPos` / `aUv` columns and Post-VS shows `gl_Position` and `vUv`; the LUMINANCE texture is viewable; the depth renderbuffer shows the not-captured banner; Trace shows the sequential-layout note and `Fragments (rasterized, pre-depth)`. A page that only creates a WebGL1 context shows `Webgd: WebGL1 not supported` in the overlay.
-12. **File → Save .webgd**, serve `python3 -m http.server 8080 --directory extension/ui`, open `http://localhost:8080`: the Capture panel shows `standalone mode: live capture unavailable`; **File → Open .webgd…** with the saved file reproduces steps 3–9.
+11. Text export: with the trace from step 10 loaded, **File → Export capture as text (.md)** downloads `capture-<unix-ms>.md` and **Export GPU trace as text (.md)** (or **Export as text** in the GPU Trace panel) downloads `trace-<unix-ms>.md`. Open both in a text editor: the capture file lists the frame commands, resources and draw state, and matches `webgd capture <saved.webgd>` apart from the header lines; the trace file has notes, passes, markers, items, counters and the per-item summary. The trace export stays disabled until a trace of the loaded capture has run.
+12. Repeat with `webgl2.html`: the overlay shows; `gl2: 1`, marker groups, `drawElements` shows the RGBA16F target, uniforms and texture units; Geometry Pre-VS shows `aPos` / `aUv` columns and Post-VS shows `gl_Position` and `vUv`; the LUMINANCE texture is viewable; the depth renderbuffer shows the not-captured banner; Trace shows the sequential-layout note and `Fragments (rasterized, pre-depth)`. A page that only creates a WebGL1 context shows `Webgd: WebGL1 not supported` in the overlay.
+13. **File → Save .webgd**, serve `python3 -m http.server 8080 --directory extension/ui`, open `http://localhost:8080`: the Capture panel shows `standalone mode: live capture unavailable`; **File → Open .webgd…** with the saved file reproduces steps 3–9.
 
 ## Automated browser testing
 

@@ -214,7 +214,10 @@ impl App {
         let summary = self.capture_summary();
         let mut open = false;
         let mut save = false;
+        let mut export_capture = false;
+        let mut export_trace = false;
         let has_capture = self.state.loaded.is_some();
+        let has_trace = self.state.trace.is_some();
         let shortcut = ui.ctx().format_shortcut(&OPEN_SHORTCUT);
         let st = &mut self.state;
         egui::Panel::top("webgd_menu_bar")
@@ -238,6 +241,27 @@ impl App {
                             .clicked()
                         {
                             save = true;
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                has_capture,
+                                egui::Button::new("Export capture as text (.md)"),
+                            )
+                            .clicked()
+                        {
+                            export_capture = true;
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                has_capture && has_trace,
+                                egui::Button::new("Export GPU trace as text (.md)"),
+                            )
+                            .clicked()
+                        {
+                            export_trace = true;
                             ui.close();
                         }
                     });
@@ -270,6 +294,12 @@ impl App {
         }
         if save {
             self.save_file();
+        }
+        if export_capture {
+            export_capture_text(&mut self.state);
+        }
+        if export_trace {
+            export_trace_text(&mut self.state);
         }
     }
 
@@ -356,6 +386,41 @@ impl App {
                 });
             });
     }
+}
+
+/// Saves the loaded capture as `capture-<unix-ms>.md`, including the errors of the latest finished
+/// replay of this capture; reports the outcome in `st.status`.
+pub(crate) fn export_capture_text(st: &mut AppState) {
+    let Some(l) = &st.loaded else { return };
+    let generation = l.generation;
+    let replay_errors = st.replay.results(|r| match &r.replay {
+        Some((k, Ok(info))) if k.generation == generation => info.errors.clone(),
+        _ => Vec::new(),
+    });
+    let opts = webgd_core::export::CaptureExportOptions {
+        replay_errors,
+        ..Default::default()
+    };
+    let text = webgd_core::export::capture_markdown(&l.cap, &opts);
+    let name = format!("capture-{}.md", crate::js::now_ms() as u64);
+    st.status = match crate::files::save_text(&name, &text) {
+        Ok(name) => format!("exported {name}"),
+        Err(e) => format!("export failed: {e}"),
+    };
+}
+
+/// Saves `st.trace` (always for the loaded capture) as `trace-<unix-ms>.md`; reports the outcome
+/// in `st.status`.
+pub(crate) fn export_trace_text(st: &mut AppState) {
+    let (Some(l), Some(trace)) = (&st.loaded, &st.trace) else {
+        return;
+    };
+    let text = webgd_core::export::trace_markdown(&l.cap, trace);
+    let name = format!("trace-{}.md", crate::js::now_ms() as u64);
+    st.status = match crate::files::save_text(&name, &text) {
+        Ok(name) => format!("exported {name}"),
+        Err(e) => format!("export failed: {e}"),
+    };
 }
 
 /// Live targets with a Capture action each.

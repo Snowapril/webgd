@@ -23,6 +23,7 @@ webgd is a frame debugger for web pages that render with WebGL2 or WebGPU. It ru
 - **GPU trace.** A timeline with collapsible queue groups (passes, markers, items) and a counters group: Occupancy, ALU, Branches and Texture samples (all marked "(est.)"), and Fragments. Ctrl+wheel zooms, drag pans, `F` fits the view, and a crosshair reads out the time. Drag the ruler or shift+drag to select a range (Esc clears; Zoom to range / Clear range); the range summary shows duration, item count, per-counter average/total and the top 10 items. Clicking a bar selects its command.
 - **Save/Open `.webgd`.** A `.webgd` file holds the raw capture bytes. Saved captures open in standalone mode without the extension.
 - **Page-side markers.** Pages can call `window.__webgd.pushMarker(name)`, `popMarker()` and `insertMarker(name)` to annotate WebGL2 frames.
+- **Text export for agents and scripts.** The `webgd` CLI and the File menu write a capture (and, from the UI, a GPU trace) as Markdown, for readers without a browser such as scripts and LLM agents.
 
 ## How it works
 
@@ -77,6 +78,18 @@ python3 -m http.server 8000 --directory tests/pages
 4. Select an event in **Events** or the **Scrubber** to see it in **Render Targets** and the **API Inspector**. Browse resources in **Resources** and their history in the **Resource Viewer**, or switch to the **GPU Trace** workspace and click **Run trace**.
 
 [docs/user-guide.md](docs/user-guide.md) covers each panel.
+
+## Text export
+
+```sh
+cargo run -p webgd-cli -- capture file.webgd -o capture.md
+# or, after cargo build --release -p webgd-cli:
+target/release/webgd capture file.webgd --max-rows 200
+```
+
+Options: `--setup`, `--no-commands`, `--no-resources`, `--no-draw-state`, `--max-rows N`, `-o out.md` (default: stdout). In the UI, **File → Export capture as text (.md)** writes the same report plus the latest replay errors, and **File → Export GPU trace as text (.md)** (or **Export as text** in the GPU Trace panel) writes the trace.
+
+A `.webgd` file holds API calls and resource data but no GPU timings. Traces need a GPU replay in the browser UI, so the CLI exports captures only and trace text comes from the UI. See [docs/user-guide.md](docs/user-guide.md#exporting-as-text).
 
 ## Standalone mode
 

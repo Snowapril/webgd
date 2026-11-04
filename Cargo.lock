@@ -3078,6 +3078,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "webgd-cli"
+version = "0.1.0"
+dependencies = [
+ "webgd-core",
+]
+
+[[package]]
 name = "webgd-core"
 version = "0.1.0"
 dependencies = [

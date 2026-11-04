@@ -1,0 +1,11 @@
+[package]
+name = "webgd-cli"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "webgd"
+path = "src/main.rs"
+
+[dependencies]
+webgd-core.workspace = true

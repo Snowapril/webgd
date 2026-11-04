@@ -20,10 +20,11 @@ Related documents:
 | `extension/bridge.js` | page, ISOLATED world | Relays between `window.postMessage` (hook) and the `chrome.runtime` port `webgd-target` (UI). Splits captures into base64 chunks. |
 | `extension/background.js` | service worker | Opens `ui/index.html` in a new tab when the toolbar action is clicked. |
 | `web/index.html`, `web/main.js` | webgd tab | Host page: a `<canvas id="webgd_canvas">` and a module script that calls the wasm-bindgen `init()`. `cargo xtask build` copies both into `extension/ui/`. |
-| `crates/webgd-core` | native + wasm | Capture model (`capture.rs`), wire decoder (`wire.rs`), call labels (`display.rs`), pixel decoding (`pixels.rs`), pure trackers (`track/commands.rs`, `track/gl.rs`, `track/gpu.rs`, `track/resources.rs`). |
+| `crates/webgd-core` | native + wasm | Capture model (`capture.rs`), wire decoder (`wire.rs`), call labels (`display.rs`), pixel decoding (`pixels.rs`), pure trackers (`track/commands.rs`, `track/gl.rs`, `track/gpu.rs`, `track/resources.rs`), GPU trace data types (`trace_model.rs`), Markdown text export (`export.rs`). |
 | `crates/webgd-analysis` | native + wasm | Static shader analysis: WGSL through naga (`wgsl.rs`), GLSL ES through glsl-lang (`glsl.rs`). Every counter constant and formula lives in `model.rs`. |
 | `crates/webgd-replay` | wasm only | Replay engine (`engine.rs`), JS access helpers (`js.rs`), `Value` to `JsValue` conversion (`value.rs`), GL snapshot restore, formats, uniforms and inspection (`gl/`), GPU snapshot restore and inspection (`gpu/`), trace runner (`trace.rs`). |
 | `crates/webgd-ui` | wasm only (cdylib) | eframe 0.36 app with an egui_dock layout on the wgpu renderer. Port client (`port.rs`), replay scheduling (`replay_queue.rs`), file open/save (`files.rs`), panels (`panels/`). |
+| `crates/webgd-cli` | native | Binary `webgd`: decodes a `.webgd` file and prints its Markdown text export (`webgd capture <file.webgd> [...]`). |
 | `xtask` | native | `cargo xtask build [--release]`. Checks `wasm-bindgen --version` for `0.2.130`, builds `webgd-ui` for `wasm32-unknown-unknown`, runs `wasm-bindgen --target web --no-typescript --out-dir extension/ui --out-name webgd_ui`, copies the `web/` files. |
 
 ### Crate dependency graph
@@ -31,6 +32,7 @@ Related documents:
 ```mermaid
 flowchart TD
   ui[webgd-ui<br/>cdylib + rlib] --> replay[webgd-replay]
+  cli[webgd-cli<br/>binary webgd] --> core
   ui --> core[webgd-core]
   ui --> analysis[webgd-analysis]
   ui --> eframe[eframe / egui / egui_dock / wgpu]
@@ -43,7 +45,7 @@ flowchart TD
   core --> thiserror[thiserror]
 ```
 
-The workspace sets `default-members` to `webgd-core`, `webgd-analysis` and `xtask`. A plain
+The workspace sets `default-members` to `webgd-core`, `webgd-analysis`, `webgd-cli` and `xtask`. A plain
 `cargo test` therefore builds only native code. `webgd-replay` and `webgd-ui` are gated with
 `#![cfg(target_arch = "wasm32")]` and are only built for the wasm target. `webgd-replay` has no
 `web-sys` dependency.
@@ -641,6 +643,42 @@ widths from declarations, constructors, swizzles and built-ins.
 
 The counters are estimates of this model and are always labelled `(est.)`. Durations are
 measured on webgd's replay device, not on the page's own submission.
+
+## Text export: `webgd-core/src/export.rs`
+
+Scripts and LLM agents cannot drive the browser UI, so webgd can write a capture or a GPU trace
+as Markdown.
+
+- `capture_markdown(cap, &CaptureExportOptions)` renders the capture: header, frame commands
+  (and optionally the setup section), resources and per-draw state. The options toggle setup,
+  commands, resources and draw state and cap table rows with `max_rows`.
+- `trace_markdown(cap, &TraceResult)` renders a trace: notes, passes, markers, items, counters
+  and a per-item summary.
+
+Both functions are pure and deterministic: the same input produces byte-identical output. Rows
+follow capture and trace order, markers are sorted by `(start_ns, index)`, and hash maps are used
+only for lookups, never iterated into the output. Exports can therefore be diffed and checked in
+tests.
+
+The trace data types (`TraceResult`, `QueueTrack`, `Span`, `CounterTrack`, `CounterSample`) live
+in `webgd-core/src/trace_model.rs`. They used to be in `webgd-replay`, which is wasm-only, and
+`webgd-replay::trace` now re-exports them. Moving them lets the native exporter and its tests use
+them without depending on the replay engine. `CounterSample.index` is the frame command index of
+the item the sample was measured for. Samples are one per item, and several items can share the
+same time span when timestamps are quantized, so the exporter joins counters to items by index,
+not by time.
+
+Entry points:
+
+- **CLI** (`crates/webgd-cli`, binary `webgd`): `webgd capture <file.webgd> [--setup]
+  [--no-commands] [--no-resources] [--no-draw-state] [--max-rows N] [-o out.md]`, plus
+  `webgd help`. Exit code 2 means a usage error and 1 means an I/O or decode error. A `.webgd` file
+  holds API calls and resource data but no GPU timings. Timings need a GPU replay in the browser,
+  so the CLI exports captures only.
+- **UI**: **File → Export capture as text (.md)** downloads `capture-<unix-ms>.md`, which adds
+  the replay errors of the latest replay. **File → Export GPU trace as text (.md)** and the GPU
+  Trace panel's **Export as text** button (next to **Run trace**) download `trace-<unix-ms>.md`.
+  The trace export controls are enabled only after a trace of the loaded capture has run.
 
 ## Design decisions
 

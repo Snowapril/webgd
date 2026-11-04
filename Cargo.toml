@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-default-members = ["crates/webgd-core", "crates/webgd-analysis", "xtask"]
+default-members = ["crates/webgd-core", "crates/webgd-analysis", "crates/webgd-cli", "xtask"]
 
 [workspace.package]
 edition = "2024"

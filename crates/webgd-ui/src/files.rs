@@ -1,4 +1,4 @@
-//! `.webgd` open (hidden file input) and save (Blob + anchor download).
+//! `.webgd` open (hidden file input) and save / text export (Blob + anchor download).
 use crate::port::{Inbox, Incoming};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
@@ -46,25 +46,45 @@ pub fn open_file(ctx: egui::Context, inbox: Inbox) -> Result<(), String> {
 
 /// Downloads `bytes` as `capture-<unix-ms>.webgd`.
 pub fn save_file(bytes: &[u8]) -> Result<String, String> {
+    let name = format!("capture-{}.webgd", crate::js::now_ms() as u64);
+    download(
+        &js_sys::Uint8Array::from(bytes),
+        "application/octet-stream",
+        &name,
+    )?;
+    Ok(name)
+}
+
+/// Downloads `text` as the Markdown file `name`; returns `name`.
+pub fn save_text(name: &str, text: &str) -> Result<String, String> {
+    download(
+        &wasm_bindgen::JsValue::from_str(text),
+        "text/markdown;charset=utf-8",
+        name,
+    )?;
+    Ok(name.to_string())
+}
+
+/// Wraps `part` in a Blob of type `mime` and clicks a download anchor named `name`.
+fn download(part: &wasm_bindgen::JsValue, mime: &str, name: &str) -> Result<(), String> {
     let doc = web_sys::window()
         .and_then(|w| w.document())
         .ok_or("no document")?;
-    let arr = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let arr = js_sys::Array::of1(part);
     let opts = web_sys::BlobPropertyBag::new();
-    opts.set_type("application/octet-stream");
+    opts.set_type(mime);
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&arr, &opts)
         .map_err(|e| crate::js::error_text(&e))?;
     let url =
         web_sys::Url::create_object_url_with_blob(&blob).map_err(|e| crate::js::error_text(&e))?;
-    let name = format!("capture-{}.webgd", crate::js::now_ms() as u64);
     let a: web_sys::HtmlAnchorElement = doc
         .create_element("a")
         .map_err(|_| "create anchor")?
         .dyn_into()
         .map_err(|_| "anchor cast")?;
     a.set_href(&url);
-    a.set_download(&name);
+    a.set_download(name);
     a.click();
     let _ = web_sys::Url::revoke_object_url(&url);
-    Ok(name)
+    Ok(())
 }

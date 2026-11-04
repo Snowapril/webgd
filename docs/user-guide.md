@@ -268,6 +268,57 @@ window.__webgd?.insertMarker('cube');
 
 Markers apply to the given context, or to the last WebGL2 context that received a call. They appear as groups in Events, as bands in the Scrubber and as marker rows in GPU Trace. WebGPU pages can use the native `pushDebugGroup` / `popDebugGroup` / `insertDebugMarker`, which webgd treats the same way. Use optional chaining so the page still runs without the extension.
 
+## Exporting as text
+
+webgd can write a capture or a GPU trace as a Markdown report, for readers without a browser (scripts, LLM agents, diffs).
+
+### From the UI
+
+- **File → Export capture as text (.md)** downloads `capture-<unix-ms>.md`. It includes the replay errors of the latest replay.
+- **File → Export GPU trace as text (.md)** downloads `trace-<unix-ms>.md`. It is enabled only after a trace of the loaded capture has been run. The GPU Trace panel has the same action as **Export as text**, next to **Run trace**.
+
+### Capture report contents
+
+Sections, in order:
+
+1. **Summary**: URL, detected APIs, call counts per section (setup, snapshot, frame), object, draw, dispatch and resource counts.
+2. **Replay errors**: UI export only, when the latest replay reported errors.
+3. **Frame commands**: the command tree with index, kind and call label. Omit with `--no-commands`.
+4. **Draw state**: per draw/dispatch, the state known statically from the capture (WebGPU pass state and pipeline summary, GL bindings). Omit with `--no-draw-state`.
+5. **Resources**: the resource table, plus per-resource **Revisions**. Omit with `--no-resources`.
+6. **Pre-frame setup**: the setup-section calls. Only with `--setup`.
+
+A capture report has no GPU timings and no pixel data.
+
+### Trace report contents
+
+A header (capture URL, total time, queue and counter-track counts), then **Notes**, one **Queue** section per queue with **Passes**, **Markers** and **Items** tables, **Counters** (one table per track; estimated counters keep the "(est.)" label), and a **Per-item summary** that joins each item's duration with every counter's value and total.
+
+### Command line
+
+```sh
+cargo run -p webgd-cli -- capture file.webgd [options]
+target/release/webgd capture file.webgd [options]   # after cargo build --release -p webgd-cli
+webgd help
+```
+
+| Option | Effect |
+|---|---|
+| `--setup` | include pre-frame setup calls |
+| `--no-commands` | omit the frame command list |
+| `--no-resources` | omit the resource table and revision histories |
+| `--no-draw-state` | omit per-draw/dispatch static state |
+| `--max-rows N` | truncate each list to N entries; truncation is stated in the output |
+| `-o out.md` | write to a file instead of stdout |
+
+Exit codes: `0` success, `2` usage error, `1` I/O or decode error.
+
+### Tips for agents
+
+- Large captures produce long reports. Start with `--max-rows 200` (or lower), and drop sections you don't need with `--no-resources` / `--no-draw-state`.
+- Command indices in the report match the frame command indices used by the Events panel and by trace items, so an agent can name a command for you to select in the UI.
+- For timing questions, run the trace in the UI and export it. The CLI cannot produce it: a `.webgd` file holds API calls and resource data but no GPU timings, and a trace needs a GPU replay in the browser.
+
 ## Standalone mode
 
 The UI also runs without the extension, e.g. `python3 -m http.server 8080 --directory extension/ui` then `http://localhost:8080`. The Capture menu and panel show `standalone mode: live capture unavailable`; **File → Open .webgd…** and every inspection panel still work.

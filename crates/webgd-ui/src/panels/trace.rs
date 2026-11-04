@@ -397,6 +397,15 @@ impl TraceUi {
                     ctx.request_repaint();
                 });
             }
+            if ui
+                .add_enabled(
+                    !running && st.trace.is_some(),
+                    egui::Button::new("Export as text"),
+                )
+                .clicked()
+            {
+                crate::app::export_trace_text(st);
+            }
             if running {
                 ui.spinner();
                 ui.label("tracing (5 instrumented replays)…");
