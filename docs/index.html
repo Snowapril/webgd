@@ -104,7 +104,7 @@ ol.steps{grid-template-columns:repeat(4,1fr)}
 <h1>webgd</h1>
 <p class="pitch">An in-browser frame debugger and GPU trace for web pages that render with WebGL2 or WebGPU.</p>
 <div class="actions">
-<a class="btn primary" role="link" aria-disabled="true" tabindex="0" title="Chrome Web Store listing is not ready yet" aria-describedby="store-note">Add to Chrome — coming soon</a>
+<a class="btn primary" role="link" aria-disabled="true" tabindex="0" title="The extension is not published in the Chrome Web Store yet" aria-describedby="store-note">Chrome extension — coming soon</a>
 <a class="btn secondary" href="https://github.com/Snowapril/webgd">View on GitHub</a>
 <a class="btn secondary" href="report.html">Read the docs</a>
 </div>
@@ -117,7 +117,8 @@ ol.steps{grid-template-columns:repeat(4,1fr)}
 <h2 id="intro-h">What it is</h2>
 <p>webgd records every WebGL2 or WebGPU call a page makes in one frame, then lets you step through that frame command by command, inspecting render targets, pipeline state, geometry and resource contents at each point.</p>
 <p>A Chrome extension hooks the page's graphics APIs and captures one <code>requestAnimationFrame</code> frame, along with a snapshot of GPU resource contents at the start of that frame. The webgd tab, a Rust/WASM app, replays the frame on its own WebGL2 context or GPU device up to whichever command you select.</p>
-<p>It runs locally in your browser. Captures stay on your machine unless you save them as a <code>.webgd</code> file.</p>
+<p>It runs locally in your browser: webgd does not upload or send captures anywhere. Saving a capture writes a <code>.webgd</code> file to your computer.</p>
+<p>To capture any page you choose, the extension asks for access to all websites and injects its capture script into every page you open. A capture contains whatever that frame's graphics calls carried (buffers, textures, shader source), so treat saved <code>.webgd</code> files like the page content itself.</p>
 </div>
 </section>
 
@@ -137,28 +138,28 @@ ol.steps{grid-template-columns:repeat(4,1fr)}
 
 <section id="gallery" aria-labelledby="gallery-h">
 <div class="wrap">
-<h2 id="gallery-h">Captured from a real game</h2>
-<p class="gallery-lead">Sample: a three.js WebGL2 game at pokebonk.com, captured and replayed with webgd.</p>
+<h2 id="gallery-h">Screenshots</h2>
+<p class="gallery-lead">All screenshots show webgd's own WebGPU test scene (<code>tests/pages/webgpu.html</code> in the repository): a checkered cube rendered to an offscreen target, a compute pass and a composite pass, captured and replayed with webgd.</p>
 <div class="gallery">
 <figure class="wide">
-<a href="assets/pokebonk-overlay.jpg"><img src="assets/pokebonk-overlay.jpg" alt="The pokebonk.com WebGL2 game running in Chrome, with the small webgd overlay in the top-right corner reading Webgd capturable alongside FPS and frame counters"></a>
-<figcaption><strong>Page overlay.</strong> The game page once webgd has hooked its WebGL2 context.</figcaption>
+<a href="assets/overlay.jpg"><img src="assets/overlay.jpg" alt="The webgd WebGPU test page showing a checkered cube, with the small webgd overlay in the top-right corner reading Webgd capturable alongside FPS and frame counters"></a>
+<figcaption><strong>Page overlay.</strong> The test page once webgd has hooked its WebGPU device.</figcaption>
 </figure>
 <figure>
 <a href="assets/frame-debugger.jpg"><img src="assets/frame-debugger.jpg" alt="webgd Frame Debugger workspace with a draw call selected in the Events list, its render target in Render Targets and its pipeline state in the API Inspector" loading="lazy"></a>
-<figcaption><strong>Frame Debugger.</strong> A draw selected, with its render targets and pipeline state.</figcaption>
+<figcaption><strong>Frame Debugger.</strong> The cube's <code>drawIndexed</code> selected, with its render targets and pipeline state.</figcaption>
 </figure>
 <figure>
 <a href="assets/geometry.jpg"><img src="assets/geometry.jpg" alt="webgd Geometry tab showing the selected draw's mesh in a 3D viewport above a vertex attribute table" loading="lazy"></a>
-<figcaption><strong>Geometry.</strong> The draw's vertices in 3D, with the vertex table below.</figcaption>
+<figcaption><strong>Geometry.</strong> The cube after the vertex shader, in normalized device coordinates, with the output table below.</figcaption>
 </figure>
 <figure>
 <a href="assets/revisions.jpg"><img src="assets/revisions.jpg" alt="webgd Resource Viewer showing a texture's contents next to the Revisions panel listing the commands that created and wrote it" loading="lazy"></a>
-<figcaption><strong>Resource Viewer.</strong> A texture and the list of commands that created and wrote it.</figcaption>
+<figcaption><strong>Resource Viewer.</strong> The offscreen texture and its revisions: created before the frame, cleared, then drawn.</figcaption>
 </figure>
 <figure>
 <a href="assets/gpu-trace.jpg"><img src="assets/gpu-trace.jpg" alt="webgd GPU Trace workspace with a timeline of passes, markers and draw items above estimated counter graphs" loading="lazy"></a>
-<figcaption><strong>GPU Trace.</strong> Timed items with estimated counter rows on one time axis.</figcaption>
+<figcaption><strong>GPU Trace.</strong> Render passes, debug markers and draw items with estimated counter rows on one time axis.</figcaption>
 </figure>
 </div>
 </div>
@@ -192,6 +193,7 @@ ol.steps{grid-template-columns:repeat(4,1fr)}
 <li><a href="report.html">Project report</a></li>
 </ul>
 <p>webgd is open source under the MIT License.</p>
+<p>webgd is an independent project and is not affiliated with, sponsored or endorsed by Google, the Khronos Group or the W3C. Chrome is a trademark of Google LLC. WebGL and the WebGL logo are trademarks of the Khronos Group Inc.</p>
 </div>
 </footer>
 </body>
