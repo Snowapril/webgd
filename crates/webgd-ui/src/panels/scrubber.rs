@@ -2,7 +2,7 @@
 //! submits) with marker / debug-group bands above it. Widths follow GPU duration when a trace is
 //! available, otherwise every action gets the same width.
 use crate::state::{AppState, Loaded};
-use crate::widgets::{ACCENT, event_color, fmt_ns, kind_color, marker_color};
+use crate::widgets::{ACCENT, event_color, fmt_ns, kind_color, marker_color, origin_style};
 use egui::{Align2, FontId, Key, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -355,6 +355,24 @@ impl ScrubberUi {
                 painter.vline(fx(lay.start[i]), r.y_range(), sep);
             }
         }
+
+        // Edit markers: a triangle above each edited action / insertion point, in the edit colour.
+        for (i, &o) in l.origin.iter().enumerate() {
+            let Some((color, _, _)) = origin_style(o) else {
+                continue;
+            };
+            let x = if lay.start[i + 1] > lay.start[i] {
+                block_rect(i).center().x
+            } else {
+                fx(lay.start[i])
+            };
+            let top = lane.top();
+            painter.add(egui::Shape::convex_polygon(
+                vec![pos2(x - 4.0, top), pos2(x + 4.0, top), pos2(x, top + 6.0)],
+                color,
+                Stroke::new(1.0, vis.extreme_bg_color),
+            ));
+        }
         if let Some(Hit::Event(i)) = hover {
             painter.rect_stroke(
                 block_rect(i).expand(1.0),
@@ -437,6 +455,9 @@ impl ScrubberUi {
                         Some(&d) => ui.weak(format!("{kind:?} · GPU {}", fmt_ns(d as f64))),
                         None => ui.weak(format!("{kind:?}")),
                     };
+                    if let Some((c, _, word)) = origin_style(l.origin_of(i)) {
+                        ui.colored_label(c, word);
+                    }
                 }
                 Hit::Band(b) => {
                     let b = &lay.bands[b];

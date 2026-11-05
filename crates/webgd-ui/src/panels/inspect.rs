@@ -457,6 +457,7 @@ impl InspectorUi {
                     .monospace()
                     .strong(),
             );
+            crate::widgets::origin_badge(ui, l.origin_of(insp.index));
             let label = l.labels.get(insp.index).map(String::as_str).unwrap_or("");
             ui.add(egui::Label::new(RichText::new(label).monospace()).truncate());
         });

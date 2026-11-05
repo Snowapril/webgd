@@ -268,6 +268,23 @@ window.__webgd?.insertMarker('cube');
 
 Markers apply to the given context, or to the last WebGL2 context that received a call. They appear as groups in Events, as bands in the Scrubber and as marker rows in GPU Trace. WebGPU pages can use the native `pushDebugGroup` / `popDebugGroup` / `insertDebugMarker`, which webgd treats the same way. Use optional chaining so the page still runs without the extension.
 
+## Editing commands
+
+The **Command Editor** tab (Frame Debugger workspace, next to API Inspector) edits the selected frame command.
+
+- **Arguments.** Known state commands get typed editors: numbers with ranges, checkboxes, enum and bitfield pickers with GL/WebGPU names, and object pickers (`Class#id "label"`) for programs, vertex arrays, pipelines and bind groups. Other calls get a generic editor for numbers, booleans, strings, object references and arrays/dictionaries of those. A change re-applies the edits and replays.
+- **Insert before / Insert after.** Menus grouped by Viewport & scissor, Depth, Stencil, Blend, Rasterizer, Color and Pipeline, filtered to the selected command's receiver (WebGL2 context, render/compute pass or render bundle encoder). For commands without state (for example a command encoder call), the menu offers the open pass at that point and the last WebGL2 context. New commands start from the state in effect there (current viewport, current pipeline, and so on).
+- **Revert / Delete.** `Revert` restores a modified command's original arguments; `Delete` removes an inserted command. `Reset all edits (N)…` clears everything after a confirmation.
+- **Edits (N).** Lists every modified and inserted command; click one to select it.
+
+Highlighting:
+
+- Events: modified rows have an amber bar, tint and `M` badge (hover shows original vs edited call); inserted rows have a green bar, tint and `+` badge.
+- Scrubber: small amber/green triangles mark edited actions and insertion points.
+- Status bar: `N edits (session-only)`; click it to open the Command Editor. The editor header shows `modified` or `inserted` for the selection, and the original call for modified ones.
+
+Edits change what webgd replays: render targets, API Inspector, Geometry, revisions, GPU Trace and text exports all describe the edited frame. Commands are renumbered when you insert, so frame indices in the UI and in exports refer to the edited frame. Edits are kept for the session only; `File > Save .webgd` always writes the original capture.
+
 ## Exporting as text
 
 webgd can write a capture or a GPU trace as a Markdown report, for readers without a browser (scripts, LLM agents, diffs).

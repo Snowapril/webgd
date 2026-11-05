@@ -1,10 +1,12 @@
 //! Events panel: dense, virtualized frame event list with hierarchy, kind strip and GPU duration
 //! column, a collapsible "Pre-frame setup" group, filtering and keyboard navigation.
 use super::scrubber::{is_action, item_durations, trace_key};
-use crate::state::{AppState, Loaded};
-use crate::widgets::{ERROR, fmt_ns, kind_color, marker_color};
+use crate::state::{AppState, Loaded, index_of_origin};
+use crate::widgets::{ERROR, fmt_ns, kind_color, marker_color, origin_style, text_on};
 use egui::{Align2, Color32, FontId, Key, Rect, Sense, Stroke, TextStyle, pos2, vec2};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+use webgd_core::edits::EditOrigin;
 use webgd_core::track::commands::{CmdKind, CmdNode};
 
 /// Horizontal indent per hierarchy level.
@@ -22,9 +24,12 @@ enum Row {
     Frame(usize),
 }
 
-/// Capture-constant data derived once per load.
+/// Capture-constant data derived once per load (and per edit).
 struct Derived {
     generation: u64,
+    /// Unedited capture and the origin of every row; carry collapsed groups across edits.
+    original: Rc<webgd_core::Capture>,
+    origin: Vec<EditOrigin>,
     frame_lower: Vec<String>,
     /// Number of actions in `tree[..k]`.
     act_prefix: Vec<u32>,
@@ -59,6 +64,8 @@ impl Derived {
         }
         Derived {
             generation: l.generation,
+            original: l.original.clone(),
+            origin: l.origin.clone(),
             frame_lower: l.labels.iter().map(|s| s.to_lowercase()).collect(),
             act_prefix,
             marker_depth,
@@ -187,10 +194,28 @@ impl CommandsUi {
             .as_ref()
             .is_none_or(|d| d.generation != l.generation)
         {
-            self.derived = Some(Derived::new(l));
-            self.collapsed.clear();
-            self.setup_open = false;
-            self.last_setup = None;
+            let mut d = Derived::new(l);
+            match self.derived.take() {
+                // Same capture with different edits: keep groups collapsed by command identity
+                // and reuse the (unedited) pre-frame setup labels.
+                Some(old) if Rc::ptr_eq(&old.original, &l.original) => {
+                    self.collapsed = self
+                        .collapsed
+                        .iter()
+                        .filter_map(|&g| {
+                            let o = *old.origin.get(g)?;
+                            index_of_origin(&l.origin, o)
+                        })
+                        .collect();
+                    d.setup = old.setup;
+                }
+                _ => {
+                    self.collapsed.clear();
+                    self.setup_open = false;
+                    self.last_setup = None;
+                }
+            }
+            self.derived = Some(d);
         }
         let tkey = (l.generation, trace_key(st));
         match st.trace.as_deref() {
@@ -414,12 +439,26 @@ impl CommandsUi {
                     Row::Frame(i) => errors.get(&i),
                     _ => None,
                 };
+                // Edited frame commands: (colour, badge letter).
+                let edit = match row {
+                    Row::Frame(i) => origin_style(l.origin_of(i)).map(|(c, b, _)| (c, b)),
+                    _ => None,
+                };
                 if selected {
                     painter.rect_filled(rect, 2.0, vis.selection.bg_fill);
                 } else if err.is_some() {
                     painter.rect_filled(rect, 2.0, ERROR.gamma_multiply(0.12));
                 } else if resp.hovered() {
                     painter.rect_filled(rect, 2.0, vis.widgets.hovered.weak_bg_fill);
+                } else if let Some((c, _)) = edit {
+                    painter.rect_filled(rect, 2.0, c.gamma_multiply(0.10));
+                }
+                if let Some((c, _)) = edit {
+                    painter.rect_filled(
+                        Rect::from_min_max(rect.left_top(), pos2(rect.left() + 3.0, rect.bottom())),
+                        1.0,
+                        c,
+                    );
                 }
 
                 // `#` column and kind strip.
@@ -470,6 +509,21 @@ impl CommandsUi {
                     );
                 }
                 let mut x = indent + 16.0;
+                if let Some((c, badge)) = edit {
+                    let r = Rect::from_min_size(
+                        pos2(x, rect.top() + 2.0),
+                        vec2(cw + 6.0, rect.height() - 4.0),
+                    );
+                    lp.rect_filled(r, 2.0, c);
+                    lp.text(
+                        r.center(),
+                        Align2::CENTER_CENTER,
+                        badge,
+                        font.clone(),
+                        text_on(c),
+                    );
+                    x = r.right() + 5.0;
+                }
                 match row {
                     Row::SetupHeader => {
                         lp.text(
@@ -568,7 +622,23 @@ impl CommandsUi {
                         ui.weak("pre-frame setup call (replay shows the frame-start state)");
                     }),
                     Row::Frame(i) => resp.on_hover_ui_at_pointer(|ui| {
-                        ui.monospace(&l.labels[i]);
+                        match l.origin_of(i) {
+                            EditOrigin::Original(_) => {
+                                ui.monospace(&l.labels[i]);
+                            }
+                            EditOrigin::Modified(o) => {
+                                if let Some(c) = l.original.frame.get(o) {
+                                    ui.weak("original:");
+                                    ui.monospace(webgd_core::display::call_label(&l.original, c));
+                                }
+                                ui.colored_label(crate::widgets::EDIT_MODIFIED, "edited:");
+                                ui.monospace(&l.labels[i]);
+                            }
+                            EditOrigin::Inserted { .. } => {
+                                ui.colored_label(crate::widgets::EDIT_INSERTED, "inserted:");
+                                ui.monospace(&l.labels[i]);
+                            }
+                        }
                         if let Some(e) = err {
                             ui.colored_label(ERROR, format!("replay error: {e}"));
                         }

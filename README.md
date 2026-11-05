@@ -24,6 +24,7 @@ webgd is a frame debugger for web pages that render with WebGL2 or WebGPU. It ru
 - **Save/Open `.webgd`.** A `.webgd` file holds the raw capture bytes. Saved captures open in standalone mode without the extension.
 - **Page-side markers.** Pages can call `window.__webgd.pushMarker(name)`, `popMarker()` and `insertMarker(name)` to annotate WebGL2 frames.
 - **Text export for agents and scripts.** The `webgd` CLI and the File menu write a capture (and, from the UI, a GPU trace) as Markdown, for readers without a browser such as scripts and LLM agents.
+- **Command editing.** The **Command Editor** tab changes the arguments of any recorded frame command and inserts new state commands (viewport, scissor, depth/stencil/blend enables and functions, cull, color mask; WebGPU `setViewport`, `setScissorRect`, `setBlendConstant`, `setStencilReference`, pipeline and bind group swaps). Replays, render targets, inspector, geometry and traces use the edited frame. Modified commands are marked `M` in amber and inserted ones `+` in green in the Events list, the Scrubber and the status bar. Edits are session-only; Save .webgd keeps the original capture.
 
 ## How it works
 

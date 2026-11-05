@@ -1,6 +1,7 @@
 //! Shared widgets and look: palette, theme, descriptor trees, banners, image textures.
 use egui::{Color32, CornerRadius, Margin, RichText, Stroke, TextureHandle, TextureOptions, vec2};
 use webgd_core::display::{obj_label, value_label};
+use webgd_core::edits::EditOrigin;
 use webgd_core::pixels::Image;
 use webgd_core::track::commands::CmdKind;
 use webgd_core::track::revisions::Access;
@@ -10,6 +11,10 @@ use webgd_core::{Capture, ObjId, Value};
 pub const ACCENT: Color32 = Color32::from_rgb(46, 140, 160);
 pub const WARN: Color32 = Color32::from_rgb(230, 200, 60);
 pub const ERROR: Color32 = Color32::from_rgb(235, 96, 96);
+/// Highlight of frame commands whose arguments were edited (amber).
+pub const EDIT_MODIFIED: Color32 = Color32::from_rgb(240, 150, 40);
+/// Highlight of user-inserted frame commands (green).
+pub const EDIT_INSERTED: Color32 = Color32::from_rgb(80, 196, 110);
 /// Fill of the app chrome (menu/tool bar, status bar).
 pub const CHROME_FILL: Color32 = Color32::from_rgb(24, 26, 30);
 
@@ -180,6 +185,33 @@ pub fn banner(ui: &mut egui::Ui, text: &str) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).color(WARN));
         });
+}
+
+/// Colour and short badge text of an edited command's origin; `None` for unchanged commands.
+pub fn origin_style(origin: EditOrigin) -> Option<(Color32, &'static str, &'static str)> {
+    match origin {
+        EditOrigin::Original(_) => None,
+        EditOrigin::Modified(_) => Some((EDIT_MODIFIED, "M", "modified")),
+        EditOrigin::Inserted { .. } => Some((EDIT_INSERTED, "+", "inserted")),
+    }
+}
+
+/// `modified` / `inserted` chip for an edited command; nothing for unchanged commands.
+pub fn origin_badge(ui: &mut egui::Ui, origin: EditOrigin) -> Option<egui::Response> {
+    let (color, _, word) = origin_style(origin)?;
+    let resp = egui::Frame::new()
+        .fill(color.gamma_multiply(0.22))
+        .stroke(Stroke::new(1.0, color))
+        .inner_margin(Margin::symmetric(4, 0))
+        .corner_radius(3.0)
+        .show(ui, |ui| {
+            ui.label(RichText::new(word).small().strong().color(color));
+        })
+        .response;
+    Some(resp.on_hover_text(match origin {
+        EditOrigin::Modified(i) => format!("arguments edited (original frame call #{i})"),
+        _ => "inserted by you; not part of the recorded frame".to_owned(),
+    }))
 }
 
 /// Clickable `Class#id` link; returns true when clicked.

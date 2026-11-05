@@ -644,6 +644,25 @@ widths from declarations, constructors, swizzles and built-ins.
 The counters are estimates of this model and are always labelled `(est.)`. Durations are
 measured on webgd's replay device, not on the page's own submission.
 
+## Command editing: `webgd-core/src/edits.rs`
+
+Edits are stored next to the original capture, never applied in place. `CaptureEdits` holds
+replacement argument lists keyed by ORIGINAL frame index (`modified`), commands inserted before an
+original index (`inserted`), and strings created by edits (`strings`, appended after the original
+string table). `apply(original, &edits)` returns an `EditedCapture` whose `cap` every tracker,
+exporter and the replay engine consume unchanged, plus `origin: Vec<EditOrigin>` with one entry
+per edited frame command (`Original(i)`, `Modified(i)`, `Inserted { before, slot }`). A
+modification whose arguments equal the original reports `Original`.
+
+`templates_for(class)` is the catalogue of insertable state commands per receiver class,
+`params_for_call` gives typed parameter specs for existing calls, and `default_args` fills a new
+command from the state in effect at the insertion point (snapshot `webgd:glState` plus earlier
+frame calls for GL, `track::gpu::state_at` for WebGPU passes).
+
+In the UI, `Loaded` keeps `original`, `edits` and `origin`; `AppState::apply_edits` re-applies the
+edits, rebuilds the derived data under a new capture generation (so cached replays, geometry and
+traces are discarded), clears the trace, and keeps the selection on the same command.
+
 ## Text export: `webgd-core/src/export.rs`
 
 Scripts and LLM agents cannot drive the browser UI, so webgd can write a capture or a GPU trace

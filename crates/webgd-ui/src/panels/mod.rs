@@ -1,6 +1,7 @@
 //! Dock panels.
 mod capture;
 mod commands;
+mod editor;
 mod geometry;
 mod inspect;
 mod log;
@@ -21,6 +22,7 @@ pub struct Panels {
     pub viewer: viewer::ViewerUi,
     pub geometry: geometry::GeometryUi,
     pub trace: trace::TraceUi,
+    pub editor: editor::EditorUi,
 }
 
 impl Panels {
@@ -42,6 +44,7 @@ pub fn show(tab: Tab, ui: &mut egui::Ui, st: &mut AppState, p: &mut Panels) {
         Tab::Geometry => p.geometry.show(ui, st),
         Tab::Trace => p.trace.show(ui, st),
         Tab::Scrubber => p.scrubber.show(ui, st),
+        Tab::Editor => p.editor.show(ui, st),
     }
 }
 

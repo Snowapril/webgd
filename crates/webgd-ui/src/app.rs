@@ -10,11 +10,12 @@ use webgd_core::track::commands::CmdKind;
 const OPEN_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
 
 /// Every tab, in the order listed by the Window menu.
-const ALL_TABS: [Tab; 10] = [
+const ALL_TABS: [Tab; 11] = [
     Tab::Events,
     Tab::Scrubber,
     Tab::RenderTargets,
     Tab::ApiInspector,
+    Tab::Editor,
     Tab::Resources,
     Tab::Viewer,
     Tab::Geometry,
@@ -35,14 +36,18 @@ pub struct App {
 }
 
 /// Frame Debugger: Events/Capture left, Render Targets/Resource Viewer/Geometry center,
-/// API Inspector/Resources right, Scrubber + Log as a thin bottom strip.
+/// API Inspector/Command Editor/Resources right, Scrubber + Log as a thin bottom strip.
 fn frame_debugger_layout() -> DockState<Tab> {
     let mut dock = DockState::new(vec![Tab::RenderTargets, Tab::Viewer, Tab::Geometry]);
     let surface = dock.main_surface_mut();
     let [main, bottom] = surface.split_below(NodeIndex::root(), 0.87, vec![Tab::Scrubber]);
     surface.split_right(bottom, 0.72, vec![Tab::Log]);
     let [main, _left] = surface.split_left(main, 0.25, vec![Tab::Events, Tab::Capture]);
-    surface.split_right(main, 0.62, vec![Tab::ApiInspector, Tab::Resources]);
+    surface.split_right(
+        main,
+        0.62,
+        vec![Tab::ApiInspector, Tab::Editor, Tab::Resources],
+    );
     dock
 }
 
@@ -141,11 +146,20 @@ impl App {
         }
     }
 
+    /// Saves the ORIGINAL capture bytes; edits are session-only.
     fn save_file(&mut self) {
-        let Some(bytes) = self.state.loaded.as_ref().map(|l| l.bytes.clone()) else {
+        let Some((bytes, edited)) = self
+            .state
+            .loaded
+            .as_ref()
+            .map(|l| (l.bytes.clone(), !l.edits.is_empty()))
+        else {
             return;
         };
         self.state.status = match crate::files::save_file(&bytes) {
+            Ok(name) if edited => {
+                format!("saved {name} (original capture; edits are session-only)")
+            }
             Ok(name) => format!("saved {name}"),
             Err(e) => format!("save failed: {e}"),
         };
@@ -217,6 +231,11 @@ impl App {
         let mut export_capture = false;
         let mut export_trace = false;
         let has_capture = self.state.loaded.is_some();
+        let has_edits = self
+            .state
+            .loaded
+            .as_ref()
+            .is_some_and(|l| !l.edits.is_empty());
         let has_trace = self.state.trace.is_some();
         let shortcut = ui.ctx().format_shortcut(&OPEN_SHORTCUT);
         let st = &mut self.state;
@@ -236,10 +255,16 @@ impl App {
                             open = true;
                             ui.close();
                         }
-                        if ui
-                            .add_enabled(has_capture, egui::Button::new("Save .webgd"))
-                            .clicked()
-                        {
+                        let save_resp =
+                            ui.add_enabled(has_capture, egui::Button::new("Save .webgd"));
+                        let save_resp = if has_edits {
+                            save_resp.on_hover_text(
+                                "Saves the original capture; command edits are session-only",
+                            )
+                        } else {
+                            save_resp
+                        };
+                        if save_resp.clicked() {
                             save = true;
                             ui.close();
                         }
@@ -343,6 +368,28 @@ impl App {
                         }
                     }
                     ui.separator();
+                    let edits = l.edit_count();
+                    let mut show_editor = false;
+                    if edits > 0 {
+                        let resp = ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(format!(
+                                        "{edits} edit{}",
+                                        if edits == 1 { "" } else { "s" }
+                                    ))
+                                    .color(widgets::EDIT_MODIFIED),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text(
+                                "Show in Command Editor. Edits are session-only: \
+                                 File > Save .webgd saves the original capture.",
+                            );
+                        show_editor = resp.clicked();
+                        ui.weak("(session-only)");
+                        ui.separator();
+                    }
                     let generation = l.generation;
                     if let Some(k) = st.replay.busy() {
                         ui.spinner();
@@ -379,6 +426,9 @@ impl App {
                     });
                     if show_log {
                         st.focus_tab = Some(Tab::Log);
+                    }
+                    if show_editor {
+                        st.focus_tab = Some(Tab::Editor);
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add(egui::Label::new(RichText::new(&st.status).weak()).truncate());
